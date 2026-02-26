@@ -154,20 +154,18 @@ router.post(
     const dueAt = payload.dueAt ?? dueEstimate?.dueAt;
 
     const loan = await prisma.$transaction(async (tx) => {
-      const txBook = await tx.book.findUnique({
-        where: { id: payload.bookId }
+      const claimResult = await tx.book.updateMany({
+        where: {
+          id: payload.bookId,
+          available: true
+        },
+        data: {
+          available: false
+        }
       });
-      if (!txBook) {
-        throw new HttpError(404, "Book not found");
-      }
-      if (!txBook.available) {
+      if (claimResult.count !== 1) {
         throw new HttpError(409, "Book is currently unavailable");
       }
-
-      await tx.book.update({
-        where: { id: payload.bookId },
-        data: { available: false }
-      });
 
       return tx.loan.create({
         data: {

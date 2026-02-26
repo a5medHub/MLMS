@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, getApiBaseUrl, requestJson } from "./lib/api-client";
+import { ApiError, requestJson } from "./lib/api-client";
 import type { Book, Loan, Role, User } from "./types";
 
 type AuthResponse = {
@@ -51,6 +51,7 @@ type AdminLoansOverviewResponse = {
 };
 
 type ImportProvider = "auto" | "openlibrary" | "google";
+type ViewMode = "catalog" | "dashboard";
 
 const emptyBookForm = {
   title: "",
@@ -84,6 +85,13 @@ const toDateInputValue = (isoDate: string | null): string => {
   return new Date(isoDate).toISOString().slice(0, 10);
 };
 
+const truncateText = (value: string, maxLength = 100): string => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength - 1).trimEnd()}...`;
+};
+
 const getBookCoverCandidates = (book: Book): string[] => {
   const candidates: string[] = [];
   if (book.coverUrl) {
@@ -95,6 +103,32 @@ const getBookCoverCandidates = (book: Book): string[] => {
   const googleQuery = encodeURIComponent(`intitle:${book.title} inauthor:${book.author}`);
   candidates.push(`https://books.google.com/books/content?printsec=frontcover&img=1&zoom=1&source=gbs_api&q=${googleQuery}`);
   return [...new Set(candidates)];
+};
+
+const formatRatingCount = (count: number | null): string => {
+  if (!count) {
+    return "0";
+  }
+  return Intl.NumberFormat().format(count);
+};
+
+const BookRating = ({ book }: { book: Book }) => {
+  if (book.averageRating === null) {
+    return <p className="rating-line muted">No ratings yet</p>;
+  }
+
+  const rounded = Math.round(book.averageRating);
+  const stars = `${"*".repeat(rounded)}${".".repeat(Math.max(0, 5 - rounded))}`;
+
+  return (
+    <p className="rating-line" aria-label={`${book.averageRating.toFixed(1)} out of 5`}>
+      <span className="rating-stars" aria-hidden="true">
+        {stars}
+      </span>
+      <span className="rating-value">{book.averageRating.toFixed(1)}</span>
+      <span className="rating-count">({formatRatingCount(book.ratingsCount)})</span>
+    </p>
+  );
 };
 
 const BookCover = ({ book, className }: { book: Book; className: string }) => {
@@ -175,6 +209,7 @@ const BookPreviewDialog = ({
           <div className="modal-info">
             <h3>{book.title}</h3>
             <p className="muted">{book.author}</p>
+            <BookRating book={book} />
             <p>
               <strong>Genre:</strong> {book.genre ?? "Uncategorized"}
             </p>
@@ -214,14 +249,14 @@ const BookPreviewDialog = ({
   );
 };
 
-const LoginScreen = ({
+const GoogleSignInButton = ({
   onGoogleCredential,
-  busy,
-  message
+  targetId,
+  width = 220
 }: {
   onGoogleCredential: (credential: string) => Promise<void>;
-  busy: boolean;
-  message: string;
+  targetId: string;
+  width?: number;
 }) => {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
@@ -230,12 +265,8 @@ const LoginScreen = ({
       return;
     }
 
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      const target = document.getElementById("google-signin");
+    const renderButton = () => {
+      const target = document.getElementById(targetId);
       if (!target || !window.google?.accounts?.id) {
         return;
       }
@@ -250,64 +281,155 @@ const LoginScreen = ({
         type: "standard",
         theme: "outline",
         text: "signin_with",
-        size: "large",
+        size: "medium",
         shape: "pill",
-        width: 280
+        width
       });
     };
-    document.body.appendChild(script);
 
-    return () => {
-      script.remove();
-    };
-  }, [googleClientId, onGoogleCredential]);
+    if (window.google?.accounts?.id) {
+      renderButton();
+      return;
+    }
+
+    const existingScript = document.querySelector<HTMLScriptElement>("script[data-google-signin='true']");
+    if (existingScript) {
+      existingScript.addEventListener("load", renderButton);
+      return () => {
+        existingScript.removeEventListener("load", renderButton);
+      };
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.dataset.googleSignin = "true";
+    script.onload = renderButton;
+    document.body.appendChild(script);
+  }, [googleClientId, onGoogleCredential, targetId, width]);
 
   return (
-    <main className="auth-shell storefront-shell" aria-labelledby="auth-heading">
-      <section className="storefront-hero" aria-hidden="true">
-        <p className="eyebrow storefront-badge">Editorial Picks</p>
-        <h2>Build a modern circulation desk for your readers.</h2>
-        <p className="muted">
-          Track borrowers, monitor due dates, and enrich your catalog with AI-powered metadata in one workflow.
+    <div>
+      <div id={targetId} aria-label="Google Sign In button" />
+      {!googleClientId && (
+        <p className="notice" role="alert">
+          Missing <code>VITE_GOOGLE_CLIENT_ID</code>.
         </p>
-        <div className="storefront-covers">
-          <article className="mock-book"><span>Classics</span></article>
-          <article className="mock-book"><span>Mystery</span></article>
-          <article className="mock-book"><span>History</span></article>
-          <article className="mock-book"><span>Sci-Fi</span></article>
-          <article className="mock-book"><span>Memoir</span></article>
-          <article className="mock-book"><span>Poetry</span></article>
-        </div>
-        <div className="storefront-stats">
-          <p><strong>300+</strong> seeded books</p>
-          <p><strong>Auto</strong> due-date estimate</p>
-          <p><strong>Admin</strong> overdue alerts</p>
-        </div>
-      </section>
+      )}
+    </div>
+  );
+};
 
-      <section className="auth-card storefront-card">
-        <p className="eyebrow">Mini Library Management System</p>
-        <h1 id="auth-heading">Sign in to manage your library</h1>
-        <p className="muted">
-          Continue with Google SSO to access borrowing tools, borrower insights, and catalog management.
-        </p>
-        <ul className="storefront-list">
-          <li>Borrower tracking by user</li>
-          <li>Due dates with manual admin override</li>
-          <li>Overdue alerts and metadata enrichment</li>
-        </ul>
-        <div id="google-signin" aria-label="Google Sign In button" />
-        {!googleClientId && (
-          <p className="notice" role="alert">
-            Missing <code>VITE_GOOGLE_CLIENT_ID</code>. Add it to your web environment variables.
-          </p>
-        )}
-        {busy && <p className="muted">Signing in...</p>}
-        <p className="notice" aria-live="polite">
-          {message}
-        </p>
-      </section>
-    </main>
+const ProfileMenu = ({
+  user,
+  busy,
+  message,
+  borrowedCount,
+  onGoogleCredential,
+  onLogout,
+  onOpenDashboard
+}: {
+  user: User | null;
+  busy: boolean;
+  message: string;
+  borrowedCount: number;
+  onGoogleCredential: (credential: string) => Promise<void>;
+  onLogout: () => void;
+  onOpenDashboard: () => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDocumentClick = (event: MouseEvent) => {
+      const element = rootRef.current;
+      if (!element || element.contains(event.target as Node)) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onDocumentClick);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, []);
+
+  const initials = user?.name
+    .split(" ")
+    .filter((part) => part.length > 0)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") ?? "U";
+
+  return (
+    <div className="topbar-actions" ref={rootRef}>
+      <button
+        className="profile-trigger"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={user ? `Open profile menu for ${user.name}` : "Open profile menu"}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="profile-avatar">{initials}</span>
+      </button>
+
+      {open && (
+        <section className="profile-dropdown" role="menu" aria-label="Profile menu">
+          {!user ? (
+            <>
+              <p className="profile-title">Guest mode</p>
+              <p className="muted">Browse books now. Sign in to borrow.</p>
+              <GoogleSignInButton onGoogleCredential={onGoogleCredential} targetId="google-signin-profile" width={205} />
+              {busy && <p className="profile-status muted">Signing in...</p>}
+              <p className="profile-status notice" aria-live="polite">
+                {message}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="profile-title">{user.name}</p>
+              <p className="muted">
+                {user.email} | {user.role}
+              </p>
+              <p className="profile-section-title">Borrowed books: {borrowedCount}</p>
+              <div className="profile-actions-row">
+                <button
+                  className="btn btn-outline profile-btn-small"
+                  type="button"
+                  onClick={() => {
+                    onOpenDashboard();
+                    setOpen(false);
+                  }}
+                >
+                  Dashboard
+                </button>
+                <button
+                  className="btn btn-outline profile-btn-small"
+                  onClick={() => {
+                    onLogout();
+                    setOpen(false);
+                  }}
+                  type="button"
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+    </div>
   );
 };
 
@@ -316,6 +438,8 @@ const App = () => {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(() => localStorage.getItem("mlms_access_token"));
   const [message, setMessage] = useState("Welcome.");
+  const [signingIn, setSigningIn] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("catalog");
 
   const [books, setBooks] = useState<Book[]>([]);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -405,10 +529,10 @@ const App = () => {
           params.set("cursor", cursor);
         }
 
-        const result = await authRequest<BooksResponse>(`/books?${params.toString()}`);
+        const result = await requestJson<BooksResponse>(`/books?${params.toString()}`);
         const isInitialSearch = !cursor;
-        if (isInitialSearch && query.trim() && result.data.length === 0) {
-          const fallback = await authRequest<SearchFallbackResponse>(
+        if (isInitialSearch && query.trim() && result.data.length === 0 && user) {
+          const fallback = await requestJson<SearchFallbackResponse>(
             `/search/books?q=${encodeURIComponent(query.trim())}&limit=12&withFallback=true`
           );
           setBooks(fallback.data);
@@ -429,7 +553,7 @@ const App = () => {
         setBooksLoading(false);
       }
     },
-    [authRequest, availableFilter, query]
+    [availableFilter, query, user]
   );
 
   const loadLoans = useCallback(async () => {
@@ -447,9 +571,10 @@ const App = () => {
   const loadRecommendations = useCallback(async () => {
     setRecommendationsLoading(true);
     try {
-      const result = await authRequest<{ data: Book[] }>("/ai/recommendations", {
+      const result = await requestJson<{ data: Book[] }>("/ai/recommendations", {
         method: "POST",
-        body: { limit: 5 }
+        body: { limit: 8 },
+        accessToken: tokenRef.current
       });
       setRecommendations(result.data);
     } catch (error) {
@@ -457,7 +582,7 @@ const App = () => {
     } finally {
       setRecommendationsLoading(false);
     }
-  }, [authRequest]);
+  }, []);
 
   const loadUsers = useCallback(async () => {
     if (user?.role !== "ADMIN") {
@@ -496,19 +621,36 @@ const App = () => {
   }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations]);
 
   const bootAuth = useCallback(async () => {
+    let token = tokenRef.current;
+    if (!token) {
+      setUser(null);
+      setAccessToken(null);
+      setMessage("Browse the catalog. Sign in only when you want to borrow.");
+      setBooting(false);
+      return;
+    }
+
     try {
-      let token = tokenRef.current;
-      if (!token) {
-        token = await refreshAccessToken();
-      }
       const me = await requestJson<{ user: User }>("/auth/me", { accessToken: token });
       setUser(me.user);
       setAccessToken(token);
       setMessage(`Welcome back, ${me.user.name}.`);
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.statusCode === 401) {
+        try {
+          token = await refreshAccessToken();
+          const me = await requestJson<{ user: User }>("/auth/me", { accessToken: token });
+          setUser(me.user);
+          setAccessToken(token);
+          setMessage(`Welcome back, ${me.user.name}.`);
+          return;
+        } catch {
+          // fall through to guest mode
+        }
+      }
       setUser(null);
       setAccessToken(null);
-      setMessage("Please sign in to continue.");
+      setMessage("Browse the catalog. Sign in only when you want to borrow.");
     } finally {
       setBooting(false);
     }
@@ -519,14 +661,28 @@ const App = () => {
   }, [bootAuth]);
 
   useEffect(() => {
-    if (!user) {
+    if (booting) {
       return;
     }
-    void Promise.all([loadBooks(), loadLoans(), loadRecommendations(), loadUsers(), loadAdminOverview()]);
-  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadUsers, user]);
+    void Promise.all([loadBooks(), loadRecommendations()]);
+  }, [booting, loadBooks, loadRecommendations]);
+
+  useEffect(() => {
+    if (!user) {
+      setLoans([]);
+      setUsers([]);
+      setBorrowersOverview([]);
+      setOverdueLoans([]);
+      setOverdueUsersCount(0);
+      setDueDateDrafts({});
+      return;
+    }
+    void Promise.all([loadLoans(), loadRecommendations(), loadUsers(), loadAdminOverview()]);
+  }, [loadAdminOverview, loadLoans, loadRecommendations, loadUsers, user]);
 
   const loginWithGoogleCredential = useCallback(async (credential: string) => {
     try {
+      setSigningIn(true);
       setMessage("Signing in...");
       const result = await requestJson<AuthResponse>("/auth/google", {
         method: "POST",
@@ -537,6 +693,8 @@ const App = () => {
       setMessage(`Signed in as ${result.user.name}.`);
     } catch (error) {
       setMessage(parseApiError(error));
+    } finally {
+      setSigningIn(false);
     }
   }, []);
 
@@ -548,19 +706,40 @@ const App = () => {
     } finally {
       setUser(null);
       setAccessToken(null);
-      setBooks([]);
-      setLoans([]);
-      setUsers([]);
-      setBorrowersOverview([]);
-      setOverdueLoans([]);
-      setOverdueUsersCount(0);
-      setDueDateDrafts({});
+      setViewMode("catalog");
       setMessage("Signed out.");
+      void loadRecommendations();
     }
-  }, []);
+  }, [loadRecommendations]);
 
   const activeLoans = useMemo(() => loans.filter((loan) => !loan.returnedAt), [loans]);
+  const myActiveLoans = useMemo(() => {
+    if (!user) {
+      return [];
+    }
+    return activeLoans.filter((loan) => loan.userId === user.id);
+  }, [activeLoans, user]);
   const canManageBooks = user?.role === "ADMIN";
+  const canBorrow = !!user;
+
+  const openUserDashboard = useCallback(() => {
+    if (!user) {
+      return;
+    }
+    setViewMode("dashboard");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [user]);
+
+  const ensureSignedIn = useCallback(
+    (action: string) => {
+      if (user) {
+        return true;
+      }
+      setMessage(`Sign in with Google to ${action}.`);
+      return false;
+    },
+    [user]
+  );
 
   useEffect(() => {
     if (user?.role !== "ADMIN") {
@@ -636,6 +815,9 @@ const App = () => {
   };
 
   const checkoutBook = async (bookId: string) => {
+    if (!ensureSignedIn("borrow books")) {
+      return;
+    }
     try {
       await authRequest("/loans/checkout", {
         method: "POST",
@@ -769,10 +951,6 @@ const App = () => {
     );
   }
 
-  if (!user) {
-    return <LoginScreen onGoogleCredential={loginWithGoogleCredential} busy={false} message={message} />;
-  }
-
   return (
     <>
       <a className="skip-link" href="#main-content">
@@ -780,23 +958,38 @@ const App = () => {
       </a>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Mini Library Management System</p>
-          <h1>Hi, {user.name}</h1>
-          <p className="muted">
-            Signed in as <strong>{user.role}</strong> | API: {getApiBaseUrl()}
-          </p>
+          <h1>{user ? `Hi, ${user.name}` : "Browse the public catalog"}</h1>
         </div>
-        <button className="btn btn-outline" onClick={logout} type="button">
-          Sign out
-        </button>
+        <ProfileMenu
+          user={user}
+          busy={signingIn}
+          message={message}
+          borrowedCount={myActiveLoans.length}
+          onGoogleCredential={loginWithGoogleCredential}
+          onLogout={logout}
+          onOpenDashboard={openUserDashboard}
+        />
       </header>
 
       <main id="main-content" className="page">
-        <p className="notice" aria-live="polite">
-          {message}
-        </p>
+        {user && message && !message.startsWith("Signed in as ") && (
+          <p className="notice" aria-live="polite">
+            {message}
+          </p>
+        )}
 
-        <section className="panel" aria-labelledby="books-title">
+        {viewMode === "dashboard" && user && (
+          <section className="panel dashboard-nav" aria-label="Dashboard navigation">
+            <p className="muted">Dashboard view includes your loans and management tools.</p>
+            <button className="btn btn-outline dashboard-back-btn" type="button" onClick={() => setViewMode("catalog")}>
+              Back to catalog
+            </button>
+          </section>
+        )}
+
+        {viewMode === "catalog" && (
+          <>
+            <section className="panel" aria-labelledby="books-title">
           <div className="panel-head">
             <h2 id="books-title">Books</h2>
             {canManageBooks && (
@@ -970,30 +1163,31 @@ const App = () => {
             </section>
           )}
 
-          <div className="book-grid">
+          <div className="book-grid storefront-grid">
             {books.map((book) => (
-              <article className="book-card" key={book.id}>
-                <div className="book-card-head">
+              <article className="book-card storefront-book-card" key={book.id}>
+                <div className="book-card-head storefront-book-head">
                   <BookCover book={book} className="book-cover-thumb" />
                   <header>
                     <h3>{book.title}</h3>
                     <p className="muted">{book.author}</p>
+                    <BookRating book={book} />
                   </header>
                 </div>
                 <p className={`status-pill ${book.available ? "available" : "unavailable"}`}>
                   {book.available ? "Available" : "Checked out"}
                 </p>
-                <p>{book.genre ?? "Uncategorized"}</p>
+                <p className="book-genre">{book.genre ?? "Uncategorized"}</p>
                 <p className="muted clamp-3">
                   {book.description ?? "No description yet. Click Preview to view more details."}
                 </p>
-                <div className="row-actions">
+                <div className="row-actions book-card-actions">
                   <button className="btn btn-outline" type="button" onClick={() => setPreviewBook(book)}>
                     Preview
                   </button>
                   {book.available ? (
-                    <button className="btn" type="button" onClick={() => void checkoutBook(book.id)}>
-                      Check out
+                    <button className="btn" type="button" onClick={() => void checkoutBook(book.id)} disabled={!canBorrow}>
+                      {canBorrow ? "Borrow" : "Sign in to borrow"}
                     </button>
                   ) : (
                     <span className="muted">Currently borrowed</span>
@@ -1020,82 +1214,92 @@ const App = () => {
           )}
         </section>
 
-        <section className="panel two-col">
-          <section aria-labelledby="loans-title">
-            <div className="panel-head">
-              <h2 id="loans-title">Active loans</h2>
-            </div>
-            {loansLoading && <p className="muted">Updating loans...</p>}
-            <ul className="stack-list">
-              {activeLoans.length === 0 && <li className="muted">No active loans.</li>}
-              {activeLoans.map((loan) => (
-                <li key={loan.id} className="row-item">
-                  <div>
-                    <strong>{loan.book.title}</strong>
-                    <p className="muted">
-                      Borrowed by {loan.user.name} on {new Date(loan.checkedOutAt).toLocaleDateString()}
-                    </p>
-                    <p className={loan.dueAt && new Date(loan.dueAt) < new Date() ? "overdue-text" : "muted"}>
-                      Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
-                    </p>
-                  </div>
-                  <div className="row-actions">
-                    {user.role === "ADMIN" && (
-                      <>
-                        <input
-                          type="date"
-                          value={dueDateDrafts[loan.id] ?? toDateInputValue(loan.dueAt)}
-                          onChange={(event) =>
-                            setDueDateDrafts((current) => ({ ...current, [loan.id]: event.target.value }))
-                          }
-                          aria-label={`Due date for ${loan.book.title}`}
-                        />
-                        <button
-                          className="btn btn-outline"
-                          type="button"
-                          onClick={() => void updateLoanDueDate(loan)}
-                          disabled={dueDateUpdatingId === loan.id}
-                        >
-                          {dueDateUpdatingId === loan.id ? "Saving..." : "Save due date"}
-                        </button>
-                      </>
-                    )}
-                    <button className="btn btn-outline" type="button" onClick={() => void checkinBook(loan.bookId)}>
-                      Check in
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section aria-labelledby="ai-title">
-            <div className="panel-head">
-              <h2 id="ai-title">AI recommendations</h2>
-            </div>
-            {recommendationsLoading && <p className="muted">Updating recommendations...</p>}
-            <ul className="stack-list">
-              {recommendations.length === 0 && <li className="muted">No recommendations yet.</li>}
-              {recommendations.map((book) => (
-                <li key={book.id} className="row-item">
-                  <div>
-                    <strong>{book.title}</strong>
-                    <p className="muted">
-                      {book.author} | {book.genre ?? "General"}
-                    </p>
-                  </div>
-                  {book.available && (
-                    <button className="btn" type="button" onClick={() => void checkoutBook(book.id)}>
-                      Check out
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
+        <section className="panel shelf-panel" aria-labelledby="ai-title">
+          <div className="panel-head">
+            <h2 id="ai-title">{user ? "Recommended for you" : "Popular picks"}</h2>
+          </div>
+          {recommendationsLoading && <p className="muted">Updating recommendations...</p>}
+          <div className="recommendation-shelf" role="list">
+            {recommendations.length === 0 && <p className="muted">No recommendations yet.</p>}
+            {recommendations.map((book) => (
+              <article key={book.id} className="shelf-card" role="listitem">
+                <BookCover book={book} className="book-cover-thumb shelf-cover" />
+                <h3 className="shelf-title" title={book.title}>
+                  {truncateText(book.title, 100)}
+                </h3>
+                <p className="muted shelf-author" title={book.author}>
+                  {truncateText(book.author, 70)}
+                </p>
+                <BookRating book={book} />
+                <p className="muted clamp-2 shelf-genre" title={book.genre ?? "General"}>
+                  {truncateText(book.genre ?? "General", 100)}
+                </p>
+                {book.available && (
+                  <button className="btn shelf-btn" type="button" onClick={() => void checkoutBook(book.id)} disabled={!canBorrow}>
+                    {canBorrow ? "Borrow" : "Sign in to borrow"}
+                  </button>
+                )}
+                {!book.available && <p className="muted shelf-status">Checked out</p>}
+              </article>
+            ))}
+          </div>
         </section>
+          </>
+        )}
 
-        {user.role === "ADMIN" && (
+        {viewMode === "dashboard" && user && (
+          <section className="panel two-col">
+            <section id="loans-section" aria-labelledby="loans-title">
+              <div className="panel-head">
+                <h2 id="loans-title">Active loans</h2>
+              </div>
+              {loansLoading && <p className="muted">Updating loans...</p>}
+              <ul className="stack-list">
+                {activeLoans.length === 0 && <li className="muted">No active loans.</li>}
+                {activeLoans.map((loan) => (
+                  <li key={loan.id} className="row-item">
+                    <div>
+                      <strong>{loan.book.title}</strong>
+                      <p className="muted">
+                        Borrowed by {loan.user.name} on {new Date(loan.checkedOutAt).toLocaleDateString()}
+                      </p>
+                      <p className={loan.dueAt && new Date(loan.dueAt) < new Date() ? "overdue-text" : "muted"}>
+                        Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
+                      </p>
+                    </div>
+                    <div className="row-actions">
+                      {user.role === "ADMIN" && (
+                        <>
+                          <input
+                            type="date"
+                            value={dueDateDrafts[loan.id] ?? toDateInputValue(loan.dueAt)}
+                            onChange={(event) =>
+                              setDueDateDrafts((current) => ({ ...current, [loan.id]: event.target.value }))
+                            }
+                            aria-label={`Due date for ${loan.book.title}`}
+                          />
+                          <button
+                            className="btn btn-outline"
+                            type="button"
+                            onClick={() => void updateLoanDueDate(loan)}
+                            disabled={dueDateUpdatingId === loan.id}
+                          >
+                            {dueDateUpdatingId === loan.id ? "Saving..." : "Save due date"}
+                          </button>
+                        </>
+                      )}
+                      <button className="btn btn-outline" type="button" onClick={() => void checkinBook(loan.bookId)}>
+                        Check in
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </section>
+        )}
+
+        {viewMode === "dashboard" && user?.role === "ADMIN" && (
           <section className="panel" aria-labelledby="borrowers-overview-title">
             <div className="panel-head">
               <h2 id="borrowers-overview-title">Borrowers and due alerts</h2>
@@ -1151,7 +1355,7 @@ const App = () => {
           </section>
         )}
 
-        {user.role === "ADMIN" && (
+        {viewMode === "dashboard" && user?.role === "ADMIN" && (
           <section className="panel" aria-labelledby="users-title">
             <div className="panel-head">
               <h2 id="users-title">User roles</h2>

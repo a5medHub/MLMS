@@ -3,13 +3,22 @@ import { z } from "zod";
 import { prisma } from "../db/prisma";
 import { asyncHandler } from "../lib/async-handler";
 import { persistExternalBooks, searchExternalBooks } from "../lib/external-books";
-import { requireAuth } from "../middleware/auth";
+import { FALLBACK_BOOKS } from "../lib/fallback-books";
+import { optionalAuth } from "../middleware/auth";
 
 const router = Router();
+const isMissingColumnError = (error: unknown): boolean => {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2022"
+  );
+};
 
 router.get(
   "/books",
-  requireAuth,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const query = z
       .object({
@@ -22,22 +31,101 @@ router.get(
       })
       .parse(req.query);
 
-    const books = await prisma.book.findMany({
-      where: {
-        OR: [
-          { title: { contains: query.q, mode: "insensitive" } },
-          { author: { contains: query.q, mode: "insensitive" } },
-          { genre: { contains: query.q, mode: "insensitive" } },
-          { isbn: { contains: query.q, mode: "insensitive" } }
-        ]
-      },
-      take: query.limit,
-      orderBy: [{ available: "desc" }, { title: "asc" }]
-    });
+    const where = {
+      OR: [
+        { title: { contains: query.q, mode: "insensitive" as const } },
+        { author: { contains: query.q, mode: "insensitive" as const } },
+        { genre: { contains: query.q, mode: "insensitive" as const } },
+        { isbn: { contains: query.q, mode: "insensitive" as const } }
+      ]
+    };
+
+    let books: Array<{
+      id: string;
+      title: string;
+      author: string;
+      isbn: string | null;
+      genre: string | null;
+      publishedYear: number | null;
+      description: string | null;
+      coverUrl: string | null;
+      averageRating: number | null;
+      ratingsCount: number | null;
+      available: boolean;
+      createdAt: Date;
+      updatedAt: Date;
+    }>;
+    try {
+      books = await prisma.book.findMany({
+        where,
+        take: query.limit,
+        orderBy: [{ available: "desc" }, { title: "asc" }]
+      });
+    } catch (error) {
+      if (!isMissingColumnError(error)) {
+        throw error;
+      }
+      const legacyBooks = await prisma.book.findMany({
+        where,
+        take: query.limit,
+        orderBy: [{ available: "desc" }, { title: "asc" }],
+        select: {
+          id: true,
+          title: true,
+          author: true,
+          isbn: true,
+          genre: true,
+          publishedYear: true,
+          description: true,
+          coverUrl: true,
+          available: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
+      books = legacyBooks.map((book) => ({
+        ...book,
+        averageRating: null,
+        ratingsCount: null
+      }));
+    }
 
     if (books.length > 0 || !query.withFallback) {
       res.status(200).json({
         data: books,
+        meta: {
+          source: "local",
+          fallbackUsed: false
+        }
+      });
+      return;
+    }
+
+    if (!req.user && query.withFallback) {
+      const fallback = FALLBACK_BOOKS.filter((book) => {
+        const q = query.q.toLowerCase();
+        return (
+          book.title.toLowerCase().includes(q) ||
+          book.author.toLowerCase().includes(q) ||
+          (book.genre ?? "").toLowerCase().includes(q) ||
+          (book.isbn ?? "").toLowerCase().includes(q)
+        );
+      }).slice(0, query.limit);
+      if (fallback.length > 0) {
+        res.status(200).json({
+          data: fallback,
+          meta: {
+            source: "fallback",
+            fallbackUsed: true
+          }
+        });
+        return;
+      }
+    }
+
+    if (!req.user) {
+      res.status(200).json({
+        data: [],
         meta: {
           source: "local",
           fallbackUsed: false

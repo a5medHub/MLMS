@@ -17,6 +17,8 @@ export type Book = {
   publishedYear: number | null;
   description: string | null;
   coverUrl: string | null;
+  averageRating: number | null;
+  ratingsCount: number | null;
   available: boolean;
   createdAt: string;
 };

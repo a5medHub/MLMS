@@ -12,6 +12,8 @@ export type ExternalBookCandidate = {
   publishedYear: number | null;
   description: string | null;
   coverUrl: string | null;
+  averageRating: number | null;
+  ratingsCount: number | null;
   source: ExternalSource;
 };
 
@@ -29,6 +31,8 @@ type MetadataPatch = {
   genre?: string;
   publishedYear?: number;
   isbn?: string;
+  averageRating?: number;
+  ratingsCount?: number;
 };
 
 const requestTimeoutMs = 9000;
@@ -58,6 +62,24 @@ const parsePublishedYear = (raw: unknown): number | null => {
   }
   const match = raw.match(/\b(1[0-9]{3}|20[0-9]{2}|2100)\b/);
   return match ? Number(match[1]) : null;
+};
+
+const parseAverageRating = (raw: unknown): number | null => {
+  if (typeof raw !== "number" || Number.isNaN(raw)) {
+    return null;
+  }
+  const clamped = Math.min(5, Math.max(0, raw));
+  return Number(clamped.toFixed(2));
+};
+
+const parseRatingsCount = (raw: unknown): number | null => {
+  if (typeof raw !== "number" || Number.isNaN(raw)) {
+    return null;
+  }
+  if (raw < 0) {
+    return null;
+  }
+  return Math.floor(raw);
 };
 
 const fetchJson = async <T>(url: string): Promise<T | null> => {
@@ -94,6 +116,8 @@ const searchOpenLibrary = async (query: string, limit: number): Promise<External
       subject?: string[];
       first_publish_year?: number;
       cover_i?: number;
+      ratings_average?: number;
+      ratings_count?: number;
     }>;
   }>(url);
 
@@ -119,6 +143,8 @@ const searchOpenLibrary = async (query: string, limit: number): Promise<External
         publishedYear: parsePublishedYear(doc.first_publish_year),
         description: null,
         coverUrl,
+        averageRating: parseAverageRating(doc.ratings_average),
+        ratingsCount: parseRatingsCount(doc.ratings_count),
         source: "openlibrary"
       });
   }
@@ -150,6 +176,8 @@ const searchGoogleBooks = async (query: string, limit: number): Promise<External
           thumbnail?: string;
           smallThumbnail?: string;
         };
+        averageRating?: number;
+        ratingsCount?: number;
       };
     }>;
   }>(`https://www.googleapis.com/books/v1/volumes?${params.toString()}`);
@@ -179,6 +207,8 @@ const searchGoogleBooks = async (query: string, limit: number): Promise<External
         publishedYear: parsePublishedYear(info?.publishedDate),
         description: normalizeText(info?.description),
         coverUrl: normalizeText(info?.imageLinks?.thumbnail) ?? normalizeText(info?.imageLinks?.smallThumbnail),
+        averageRating: parseAverageRating(info?.averageRating),
+        ratingsCount: parseRatingsCount(info?.ratingsCount),
         source: "google"
       });
   }
@@ -225,11 +255,25 @@ const buildMetadataPatch = (existing: LocalBook, candidate: ExternalBookCandidat
   if (!existing.isbn && candidate.isbn) {
     patch.isbn = candidate.isbn;
   }
+  if ((existing.averageRating === null || existing.averageRating === undefined) && candidate.averageRating !== null) {
+    patch.averageRating = candidate.averageRating;
+  }
+  if ((existing.ratingsCount === null || existing.ratingsCount === undefined) && candidate.ratingsCount !== null) {
+    patch.ratingsCount = candidate.ratingsCount;
+  }
   return patch;
 };
 
 const needsMetadataEnrichment = (book: LocalBook): boolean => {
-  return !book.coverUrl || !book.description || !book.genre || !book.publishedYear || !book.isbn;
+  return (
+    !book.coverUrl ||
+    !book.description ||
+    !book.genre ||
+    !book.publishedYear ||
+    !book.isbn ||
+    book.averageRating === null ||
+    book.ratingsCount === null
+  );
 };
 
 const candidateScore = (book: LocalBook, candidate: ExternalBookCandidate): number => {
@@ -411,7 +455,9 @@ export const persistExternalBooks = async (
           genre: candidate.genre,
           publishedYear: candidate.publishedYear,
           description: candidate.description,
-          coverUrl: candidate.coverUrl
+          coverUrl: candidate.coverUrl,
+          averageRating: candidate.averageRating,
+          ratingsCount: candidate.ratingsCount
         }
       });
       books.push(created);
@@ -458,7 +504,9 @@ export const enrichLibraryMetadata = async (options: {
             { description: null },
             { genre: null },
             { publishedYear: null },
-            { isbn: null }
+            { isbn: null },
+            { averageRating: null },
+            { ratingsCount: null }
           ]
         }
       : {},

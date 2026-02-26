@@ -35,6 +35,8 @@ model Book {
   publishedYear Int?
   description   String?
   coverUrl      String?
+  averageRating Float?
+  ratingsCount  Int?
   available     Boolean   @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -44,6 +46,7 @@ model Book {
   @@index([author])
   @@index([genre])
   @@index([available])
+  @@index([averageRating])
 }
 
 model Loan {
