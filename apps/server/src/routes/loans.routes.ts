@@ -4,7 +4,8 @@ import { prisma } from "../db/prisma";
 import { asyncHandler } from "../lib/async-handler";
 import { createAuditLog } from "../lib/audit";
 import { HttpError } from "../lib/errors";
-import { requireAuth } from "../middleware/auth";
+import { estimateLoanDueDate } from "../lib/reading-time";
+import { requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
 
@@ -16,6 +17,12 @@ const checkoutSchema = z.object({
 const checkinSchema = z.object({
   bookId: z.string().min(1)
 });
+
+const updateDueDateSchema = z.object({
+  dueAt: z.coerce.date()
+});
+
+const toDateOnly = (date: Date): string => date.toISOString().slice(0, 10);
 
 router.get(
   "/",
@@ -59,6 +66,64 @@ router.get(
   })
 );
 
+router.get(
+  "/admin/overview",
+  requireAuth,
+  requireRole(["ADMIN"]),
+  asyncHandler(async (_req, res) => {
+    const now = new Date();
+    const activeLoans = await prisma.loan.findMany({
+      where: { returnedAt: null },
+      include: {
+        book: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      },
+      orderBy: [{ dueAt: "asc" }, { checkedOutAt: "asc" }]
+    });
+
+    const overdueLoans = activeLoans.filter((loan) => loan.dueAt && loan.dueAt < now);
+    type ActiveLoan = (typeof activeLoans)[number];
+    const byUser = new Map<
+      string,
+      {
+        user: { id: string; name: string; email: string };
+        activeLoans: ActiveLoan[];
+        overdueCount: number;
+      }
+    >();
+
+    activeLoans.forEach((loan) => {
+      const key = loan.user.id;
+      if (!byUser.has(key)) {
+        byUser.set(key, {
+          user: loan.user,
+          activeLoans: [],
+          overdueCount: 0
+        });
+      }
+      const record = byUser.get(key)!;
+      record.activeLoans.push(loan);
+      if (loan.dueAt && loan.dueAt < now) {
+        record.overdueCount += 1;
+      }
+    });
+
+    res.status(200).json({
+      data: {
+        borrowers: [...byUser.values()],
+        overdueLoans,
+        overdueUsers: [...byUser.values()].filter((record) => record.overdueCount > 0).length
+      }
+    });
+  })
+);
+
 router.post(
   "/checkout",
   requireAuth,
@@ -68,15 +133,34 @@ router.post(
     if (!viewer) {
       throw new HttpError(401, "Authentication required");
     }
+    if (payload.dueAt && viewer.role !== "ADMIN") {
+      throw new HttpError(403, "Only admins can manually set due dates at checkout");
+    }
+
+    const book = await prisma.book.findUnique({
+      where: { id: payload.bookId }
+    });
+    if (!book) {
+      throw new HttpError(404, "Book not found");
+    }
+
+    const dueEstimate = payload.dueAt
+      ? null
+      : await estimateLoanDueDate({
+          title: book.title,
+          author: book.author,
+          isbn: book.isbn
+        });
+    const dueAt = payload.dueAt ?? dueEstimate?.dueAt;
 
     const loan = await prisma.$transaction(async (tx) => {
-      const book = await tx.book.findUnique({
+      const txBook = await tx.book.findUnique({
         where: { id: payload.bookId }
       });
-      if (!book) {
+      if (!txBook) {
         throw new HttpError(404, "Book not found");
       }
-      if (!book.available) {
+      if (!txBook.available) {
         throw new HttpError(409, "Book is currently unavailable");
       }
 
@@ -89,7 +173,7 @@ router.post(
         data: {
           bookId: payload.bookId,
           userId: viewer.id,
-          dueAt: payload.dueAt
+          dueAt
         },
         include: {
           book: true
@@ -102,10 +186,21 @@ router.post(
       action: "BOOK_CHECKED_OUT",
       entity: "LOAN",
       entityId: loan.id,
-      metadata: { bookId: payload.bookId }
+      metadata: {
+        bookId: payload.bookId,
+        dueAt: dueAt ? toDateOnly(dueAt) : null,
+        dueDateSource: dueEstimate?.source ?? "manual",
+        estimatedReadingDays: dueEstimate?.days ?? null
+      }
     });
 
-    res.status(201).json({ data: loan });
+    res.status(201).json({
+      data: loan,
+      meta: {
+        dueDateSource: dueEstimate?.source ?? "manual",
+        estimatedReadingDays: dueEstimate?.days ?? null
+      }
+    });
   })
 );
 
@@ -151,6 +246,48 @@ router.post(
     });
 
     res.status(200).json({ data: updatedLoan });
+  })
+);
+
+router.patch(
+  "/:loanId/due-date",
+  requireAuth,
+  requireRole(["ADMIN"]),
+  asyncHandler(async (req, res) => {
+    const params = z.object({ loanId: z.string().min(1) }).parse(req.params);
+    const payload = updateDueDateSchema.parse(req.body);
+
+    const loan = await prisma.loan.findUnique({
+      where: { id: params.loanId },
+      include: { book: true, user: { select: { id: true, name: true, email: true } } }
+    });
+    if (!loan) {
+      throw new HttpError(404, "Loan not found");
+    }
+    if (loan.returnedAt) {
+      throw new HttpError(409, "Cannot update due date for a returned loan");
+    }
+
+    const updated = await prisma.loan.update({
+      where: { id: loan.id },
+      data: { dueAt: payload.dueAt },
+      include: { book: true, user: { select: { id: true, name: true, email: true } } }
+    });
+
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "LOAN_DUE_DATE_UPDATED",
+      entity: "LOAN",
+      entityId: loan.id,
+      metadata: {
+        previousDueAt: loan.dueAt ? toDateOnly(loan.dueAt) : null,
+        newDueAt: toDateOnly(payload.dueAt),
+        userId: loan.userId,
+        bookId: loan.bookId
+      }
+    });
+
+    res.status(200).json({ data: updated });
   })
 );
 

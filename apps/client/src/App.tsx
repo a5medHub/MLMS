@@ -36,6 +36,20 @@ type EnrichMetadataResponse = {
   };
 };
 
+type BorrowerOverview = {
+  user: Pick<User, "id" | "name" | "email">;
+  activeLoans: Loan[];
+  overdueCount: number;
+};
+
+type AdminLoansOverviewResponse = {
+  data: {
+    borrowers: BorrowerOverview[];
+    overdueLoans: Loan[];
+    overdueUsers: number;
+  };
+};
+
 type ImportProvider = "auto" | "openlibrary" | "google";
 
 const emptyBookForm = {
@@ -61,6 +75,13 @@ const parseApiError = (error: unknown): string => {
 const toNullableText = (value: string): string | null => {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const toDateInputValue = (isoDate: string | null): string => {
+  if (!isoDate) {
+    return "";
+  }
+  return new Date(isoDate).toISOString().slice(0, 10);
 };
 
 const getBookCoverCandidates = (book: Book): string[] => {
@@ -277,6 +298,12 @@ const App = () => {
 
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loansLoading, setLoansLoading] = useState(false);
+  const [borrowersOverview, setBorrowersOverview] = useState<BorrowerOverview[]>([]);
+  const [overdueLoans, setOverdueLoans] = useState<Loan[]>([]);
+  const [overdueUsersCount, setOverdueUsersCount] = useState(0);
+  const [adminOverviewLoading, setAdminOverviewLoading] = useState(false);
+  const [dueDateDrafts, setDueDateDrafts] = useState<Record<string, string>>({});
+  const [dueDateUpdatingId, setDueDateUpdatingId] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<Book[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
@@ -421,6 +448,27 @@ const App = () => {
     }
   }, [authRequest, user?.role]);
 
+  const loadAdminOverview = useCallback(async () => {
+    if (user?.role !== "ADMIN") {
+      return;
+    }
+    setAdminOverviewLoading(true);
+    try {
+      const result = await authRequest<AdminLoansOverviewResponse>("/loans/admin/overview");
+      setBorrowersOverview(result.data.borrowers);
+      setOverdueLoans(result.data.overdueLoans);
+      setOverdueUsersCount(result.data.overdueUsers);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setAdminOverviewLoading(false);
+    }
+  }, [authRequest, user?.role]);
+
+  const refreshAfterLoanMutation = useCallback(async () => {
+    await Promise.all([loadBooks(), loadLoans(), loadRecommendations(), loadAdminOverview()]);
+  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations]);
+
   const bootAuth = useCallback(async () => {
     try {
       let token = tokenRef.current;
@@ -448,8 +496,8 @@ const App = () => {
     if (!user) {
       return;
     }
-    void Promise.all([loadBooks(), loadLoans(), loadRecommendations(), loadUsers()]);
-  }, [loadBooks, loadLoans, loadRecommendations, loadUsers, user]);
+    void Promise.all([loadBooks(), loadLoans(), loadRecommendations(), loadUsers(), loadAdminOverview()]);
+  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadUsers, user]);
 
   const loginWithGoogleCredential = useCallback(async (credential: string) => {
     try {
@@ -477,12 +525,27 @@ const App = () => {
       setBooks([]);
       setLoans([]);
       setUsers([]);
+      setBorrowersOverview([]);
+      setOverdueLoans([]);
+      setOverdueUsersCount(0);
+      setDueDateDrafts({});
       setMessage("Signed out.");
     }
   }, []);
 
   const activeLoans = useMemo(() => loans.filter((loan) => !loan.returnedAt), [loans]);
   const canManageBooks = user?.role === "ADMIN";
+
+  useEffect(() => {
+    if (user?.role !== "ADMIN") {
+      return;
+    }
+    if (overdueLoans.length > 0) {
+      setMessage(
+        `Overdue alert: ${overdueLoans.length} book(s) across ${overdueUsersCount} borrower(s) passed due date.`
+      );
+    }
+  }, [overdueLoans.length, overdueUsersCount, user?.role]);
 
   const resetBookForm = () => {
     setBookForm(emptyBookForm);
@@ -553,7 +616,7 @@ const App = () => {
         body: { bookId }
       });
       setMessage("Book checked out.");
-      await Promise.all([loadBooks(), loadLoans(), loadRecommendations()]);
+      await refreshAfterLoanMutation();
     } catch (error) {
       setMessage(parseApiError(error));
     }
@@ -566,7 +629,7 @@ const App = () => {
         body: { bookId }
       });
       setMessage("Book checked in.");
-      await Promise.all([loadBooks(), loadLoans(), loadRecommendations()]);
+      await refreshAfterLoanMutation();
     } catch (error) {
       setMessage(parseApiError(error));
     }
@@ -582,6 +645,30 @@ const App = () => {
       await loadUsers();
     } catch (error) {
       setMessage(parseApiError(error));
+    }
+  };
+
+  const updateLoanDueDate = async (loan: Loan) => {
+    const dueDate = dueDateDrafts[loan.id] ?? toDateInputValue(loan.dueAt);
+    if (!dueDate) {
+      setMessage("Select a due date before saving.");
+      return;
+    }
+
+    try {
+      setDueDateUpdatingId(loan.id);
+      await authRequest<{ data: Loan }>(`/loans/${loan.id}/due-date`, {
+        method: "PATCH",
+        body: {
+          dueAt: new Date(`${dueDate}T12:00:00.000Z`).toISOString()
+        }
+      });
+      setMessage("Loan due date updated.");
+      await Promise.all([loadLoans(), loadAdminOverview()]);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setDueDateUpdatingId(null);
     }
   };
 
@@ -911,10 +998,8 @@ const App = () => {
           <section aria-labelledby="loans-title">
             <div className="panel-head">
               <h2 id="loans-title">Active loans</h2>
-              <button className="btn btn-outline" type="button" onClick={() => void loadLoans()} disabled={loansLoading}>
-                Refresh
-              </button>
             </div>
+            {loansLoading && <p className="muted">Updating loans...</p>}
             <ul className="stack-list">
               {activeLoans.length === 0 && <li className="muted">No active loans.</li>}
               {activeLoans.map((loan) => (
@@ -924,10 +1009,35 @@ const App = () => {
                     <p className="muted">
                       Borrowed by {loan.user.name} on {new Date(loan.checkedOutAt).toLocaleDateString()}
                     </p>
+                    <p className={loan.dueAt && new Date(loan.dueAt) < new Date() ? "overdue-text" : "muted"}>
+                      Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
+                    </p>
                   </div>
-                  <button className="btn btn-outline" type="button" onClick={() => void checkinBook(loan.bookId)}>
-                    Check in
-                  </button>
+                  <div className="row-actions">
+                    {user.role === "ADMIN" && (
+                      <>
+                        <input
+                          type="date"
+                          value={dueDateDrafts[loan.id] ?? toDateInputValue(loan.dueAt)}
+                          onChange={(event) =>
+                            setDueDateDrafts((current) => ({ ...current, [loan.id]: event.target.value }))
+                          }
+                          aria-label={`Due date for ${loan.book.title}`}
+                        />
+                        <button
+                          className="btn btn-outline"
+                          type="button"
+                          onClick={() => void updateLoanDueDate(loan)}
+                          disabled={dueDateUpdatingId === loan.id}
+                        >
+                          {dueDateUpdatingId === loan.id ? "Saving..." : "Save due date"}
+                        </button>
+                      </>
+                    )}
+                    <button className="btn btn-outline" type="button" onClick={() => void checkinBook(loan.bookId)}>
+                      Check in
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -936,15 +1046,8 @@ const App = () => {
           <section aria-labelledby="ai-title">
             <div className="panel-head">
               <h2 id="ai-title">AI recommendations</h2>
-              <button
-                className="btn btn-outline"
-                type="button"
-                onClick={() => void loadRecommendations()}
-                disabled={recommendationsLoading}
-              >
-                Refresh
-              </button>
             </div>
+            {recommendationsLoading && <p className="muted">Updating recommendations...</p>}
             <ul className="stack-list">
               {recommendations.length === 0 && <li className="muted">No recommendations yet.</li>}
               {recommendations.map((book) => (
@@ -965,6 +1068,62 @@ const App = () => {
             </ul>
           </section>
         </section>
+
+        {user.role === "ADMIN" && (
+          <section className="panel" aria-labelledby="borrowers-overview-title">
+            <div className="panel-head">
+              <h2 id="borrowers-overview-title">Borrowers and due alerts</h2>
+              <button
+                className="btn btn-outline"
+                type="button"
+                onClick={() => void loadAdminOverview()}
+                disabled={adminOverviewLoading}
+              >
+                {adminOverviewLoading ? "Refreshing..." : "Refresh alerts"}
+              </button>
+            </div>
+            {overdueLoans.length > 0 ? (
+              <p className="overdue-banner">
+                Alert: {overdueLoans.length} active loan(s) are overdue across {overdueUsersCount} borrower(s).
+              </p>
+            ) : (
+              <p className="muted">No overdue loans right now.</p>
+            )}
+
+            <div className="borrowers-list">
+              {borrowersOverview.length === 0 && <p className="muted">No active borrowers yet.</p>}
+              {borrowersOverview.map((borrower) => (
+                <article key={borrower.user.id} className="borrower-card">
+                  <header>
+                    <h3>{borrower.user.name}</h3>
+                    <p className="muted">{borrower.user.email}</p>
+                    <p className={borrower.overdueCount > 0 ? "overdue-text" : "muted"}>
+                      Active books: {borrower.activeLoans.length} | Overdue: {borrower.overdueCount}
+                    </p>
+                  </header>
+                  <ul className="stack-list">
+                    {borrower.activeLoans.map((loan) => {
+                      const isOverdue = !!loan.dueAt && new Date(loan.dueAt) < new Date();
+                      return (
+                        <li key={loan.id} className="row-item">
+                          <div>
+                            <strong>{loan.book.title}</strong>
+                            <p className={isOverdue ? "overdue-text" : "muted"}>
+                              Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
+                            </p>
+                          </div>
+                          <button className="btn btn-outline" type="button" onClick={() => void checkinBook(loan.bookId)}>
+                            Check in
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         {user.role === "ADMIN" && (
           <section className="panel" aria-labelledby="users-title">

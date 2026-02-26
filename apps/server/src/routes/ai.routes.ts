@@ -2,9 +2,41 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db/prisma";
 import { asyncHandler } from "../lib/async-handler";
+import { estimateLoanDueDate } from "../lib/reading-time";
 import { requireAuth } from "../middleware/auth";
 
 const router = Router();
+
+router.post(
+  "/due-date-estimate",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = z
+      .object({
+        title: z.string().min(1),
+        author: z.string().min(1),
+        isbn: z.string().optional().nullable()
+      })
+      .parse(req.body);
+
+    const estimate = await estimateLoanDueDate({
+      title: payload.title,
+      author: payload.author,
+      isbn: payload.isbn
+    });
+
+    res.status(200).json({
+      data: {
+        dueAt: estimate.dueAt,
+        days: estimate.days
+      },
+      meta: {
+        source: estimate.source,
+        pageCount: estimate.pageCount
+      }
+    });
+  })
+);
 
 router.post(
   "/recommendations",

@@ -89,9 +89,12 @@ Base path: `/api/v1`
 - `POST /loans/checkout` - borrow a book
 - `POST /loans/checkin` - return a book
 - `GET /loans` - list loans (members see own loans; admins can view all)
+- `GET /loans/admin/overview` - grouped borrowers + overdue alerts (`ADMIN`)
+- `PATCH /loans/:loanId/due-date` - manual due date override (`ADMIN`)
 - `GET /users` - list users (`ADMIN`)
 - `PATCH /users/:userId/role` - update role (`ADMIN`)
 - `GET /search/books` - search with optional fallback import (`withFallback=true`)
+- `POST /ai/due-date-estimate` - estimate due date from web book metadata
 - `POST /ai/recommendations` - personalized recommendations
 
 ## Accessibility and UX Notes
