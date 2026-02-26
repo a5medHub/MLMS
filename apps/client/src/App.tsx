@@ -454,6 +454,7 @@ const App = () => {
   const [signingIn, setSigningIn] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("catalog");
   const [showDueSoonDetails, setShowDueSoonDetails] = useState(false);
+  const [shouldLoadRecommendations, setShouldLoadRecommendations] = useState(false);
 
   const [books, setBooks] = useState<Book[]>([]);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -647,8 +648,12 @@ const App = () => {
   }, [authRequest, user?.role]);
 
   const refreshAfterLoanMutation = useCallback(async () => {
-    await Promise.all([loadBooks(), loadLoans(), loadRecommendations(), loadAdminOverview(), loadLibraryStats()]);
-  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadLibraryStats]);
+    const tasks: Array<Promise<unknown>> = [loadBooks(), loadLoans(), loadAdminOverview(), loadLibraryStats()];
+    if (shouldLoadRecommendations) {
+      tasks.push(loadRecommendations());
+    }
+    await Promise.all(tasks);
+  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadLibraryStats, shouldLoadRecommendations]);
 
   const bootAuth = useCallback(async () => {
     let token = tokenRef.current;
@@ -694,8 +699,8 @@ const App = () => {
     if (booting) {
       return;
     }
-    void Promise.all([loadBooks(), loadRecommendations(), loadLibraryStats()]);
-  }, [booting, loadBooks, loadRecommendations, loadLibraryStats]);
+    void Promise.all([loadBooks(), loadLibraryStats()]);
+  }, [booting, loadBooks, loadLibraryStats]);
 
   useEffect(() => {
     if (!user) {
@@ -708,8 +713,38 @@ const App = () => {
       setShowDueSoonDetails(false);
       return;
     }
-    void Promise.all([loadLoans(), loadRecommendations(), loadUsers(), loadAdminOverview()]);
-  }, [loadAdminOverview, loadLoans, loadRecommendations, loadUsers, user]);
+    void Promise.all([loadLoans(), loadUsers(), loadAdminOverview()]);
+  }, [loadAdminOverview, loadLoans, loadUsers, user]);
+
+  useEffect(() => {
+    if (booting || !shouldLoadRecommendations) {
+      return;
+    }
+    void loadRecommendations();
+  }, [booting, loadRecommendations, shouldLoadRecommendations, user?.id]);
+
+  useEffect(() => {
+    if (booting || shouldLoadRecommendations || viewMode !== "catalog") {
+      return;
+    }
+    const section = document.getElementById("recommendations-section");
+    if (!section) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoadRecommendations(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "220px 0px" }
+    );
+    observer.observe(section);
+
+    return () => observer.disconnect();
+  }, [booting, shouldLoadRecommendations, viewMode, books.length]);
 
   useEffect(() => {
     if (!user) {
@@ -755,10 +790,11 @@ const App = () => {
       setAccessToken(null);
       setViewMode("catalog");
       setShowDueSoonDetails(false);
+      setShouldLoadRecommendations(false);
+      setRecommendations([]);
       setMessage("Signed out.");
-      void loadRecommendations();
     }
-  }, [loadRecommendations]);
+  }, []);
 
   const activeLoans = useMemo(() => loans.filter((loan) => !loan.returnedAt), [loans]);
   const myActiveLoans = useMemo(() => {
@@ -806,6 +842,7 @@ const App = () => {
   }, [user]);
 
   const scrollToRecommendations = useCallback(() => {
+    setShouldLoadRecommendations(true);
     const target = document.getElementById("recommendations-section");
     if (!target) {
       return;
@@ -1427,9 +1464,10 @@ const App = () => {
                   <div className="panel-head">
                     <h2 id="ai-title">{user ? "Recommended for you" : "Popular picks"}</h2>
                   </div>
-                  {recommendationsLoading && <p className="muted">Updating recommendations...</p>}
+                  {!shouldLoadRecommendations && <p className="muted">Recommendations will load when you reach this section.</p>}
+                  {shouldLoadRecommendations && recommendationsLoading && <p className="muted">Updating recommendations...</p>}
                   <div className="recommendation-shelf" role="list">
-                    {recommendations.length === 0 && <p className="muted">No recommendations yet.</p>}
+                    {shouldLoadRecommendations && recommendations.length === 0 && <p className="muted">No recommendations yet.</p>}
                     {recommendations.map((book) => (
                       <article key={book.id} className="shelf-card" role="listitem">
                         <BookCover book={book} className="book-cover-thumb shelf-cover" />

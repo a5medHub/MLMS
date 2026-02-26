@@ -1,10 +1,21 @@
-import { StrictMode } from "react";
+import { Suspense, StrictMode, lazy } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
 import "./styles.css";
-import { UiOptionsPreview } from "./ui-options-preview";
+
+const App = lazy(() => import("./App"));
+const UiOptionsPreview = lazy(() =>
+  import("./ui-options-preview").then((module) => ({
+    default: module.UiOptionsPreview
+  }))
+);
 
 const params = new URLSearchParams(window.location.search);
 const isUiPreview = params.get("preview") === "ui";
 
-createRoot(document.getElementById("root")!).render(<StrictMode>{isUiPreview ? <UiOptionsPreview /> : <App />}</StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <Suspense fallback={<main className="auth-shell"><section className="auth-card"><p>Loading...</p></section></main>}>
+      {isUiPreview ? <UiOptionsPreview /> : <App />}
+    </Suspense>
+  </StrictMode>
+);

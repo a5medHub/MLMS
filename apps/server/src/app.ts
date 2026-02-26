@@ -64,6 +64,10 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.get("/api", (_req, res) => {
+  res.redirect(307, "/api/v1");
+});
+
 app.use("/api/v1", apiRouter);
 
 const clientDistPath = path.resolve(__dirname, "../../client/dist");
