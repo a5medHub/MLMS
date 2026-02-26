@@ -277,7 +277,7 @@ const BookPreviewDialog = ({
                   Borrow this book
                 </button>
               ) : (
-                <span className="muted">This book is currently borrowed.</span>
+                <span className="muted">This book is currently checked out (borrowed).</span>
               )}
             </div>
           </div>
@@ -495,6 +495,7 @@ const App = () => {
   const [adminOverviewLoading, setAdminOverviewLoading] = useState(false);
   const [dueDateDrafts, setDueDateDrafts] = useState<Record<string, string>>({});
   const [dueDateUpdatingId, setDueDateUpdatingId] = useState<string | null>(null);
+  const [checkoutPendingIds, setCheckoutPendingIds] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<Book[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
@@ -673,13 +674,19 @@ const App = () => {
     }
   }, [authRequest, user?.role]);
 
-  const refreshAfterLoanMutation = useCallback(async () => {
-    const tasks: Array<Promise<unknown>> = [loadBooks(), loadLoans(), loadAdminOverview(), loadLibraryStats()];
-    if (shouldLoadRecommendations) {
-      tasks.push(loadRecommendations());
-    }
-    await Promise.all(tasks);
-  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadLibraryStats, shouldLoadRecommendations]);
+  const refreshAfterLoanMutation = useCallback(
+    async (options?: { includeRecommendations?: boolean }) => {
+      const tasks: Array<Promise<unknown>> = [loadBooks(), loadLoans(), loadLibraryStats()];
+      if (user?.role === "ADMIN") {
+        tasks.push(loadAdminOverview());
+      }
+      if ((options?.includeRecommendations ?? false) && shouldLoadRecommendations) {
+        tasks.push(loadRecommendations());
+      }
+      await Promise.all(tasks);
+    },
+    [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadLibraryStats, shouldLoadRecommendations, user?.role]
+  );
 
   const bootAuth = useCallback(async () => {
     let token = tokenRef.current;
@@ -964,15 +971,42 @@ const App = () => {
     if (!ensureSignedIn("borrow books")) {
       return;
     }
+    if (checkoutPendingIds.includes(bookId)) {
+      return;
+    }
     try {
+      setCheckoutPendingIds((current) => [...current, bookId]);
+      setMessage("Borrowing book...");
       await authRequest("/loans/checkout", {
         method: "POST",
         body: { bookId }
       });
-      setMessage("Book checked out.");
-      await refreshAfterLoanMutation();
+
+      // Optimistic local update for instant feedback.
+      setBooks((current) =>
+        current.map((book) => (book.id === bookId ? { ...book, available: false } : book))
+      );
+      setLibraryStats((current) =>
+        current
+          ? {
+              ...current,
+              availableBooks: Math.max(0, current.availableBooks - 1),
+              checkedOutBooks: current.checkedOutBooks + 1,
+              activeLoans: current.activeLoans + 1
+            }
+          : current
+      );
+      setRecommendations((current) =>
+        current.map((book) => (book.id === bookId ? { ...book, available: false } : book))
+      );
+
+      setMessage("Book checked out (borrowed).");
+      // Background sync (does not block UI response).
+      void refreshAfterLoanMutation({ includeRecommendations: false });
     } catch (error) {
       setMessage(parseApiError(error));
+    } finally {
+      setCheckoutPendingIds((current) => current.filter((id) => id !== bookId));
     }
   };
 
@@ -982,8 +1016,9 @@ const App = () => {
         method: "POST",
         body: { bookId }
       });
-      setMessage("Book checked in.");
-      await refreshAfterLoanMutation();
+      setMessage("Book checked in (returned).");
+      // Background sync (does not block UI response).
+      void refreshAfterLoanMutation({ includeRecommendations: false });
     } catch (error) {
       setMessage(parseApiError(error));
     }
@@ -1255,13 +1290,13 @@ const App = () => {
 
             <section className="catalog-workspace">
               <aside className="panel catalog-sidebar" aria-label="Quick filters">
-                <article className="catalog-total-books">
-                  <p className="eyebrow">Library inventory</p>
-                  <h2>{availableBooksCount} books available</h2>
-                  <p className="muted">
-                    {totalBooksCount} total | {checkedOutBooksCount} checked out
-                  </p>
-                </article>
+                  <article className="catalog-total-books">
+                    <p className="eyebrow">Library inventory</p>
+                    <h2>{availableBooksCount} books available</h2>
+                    <p className="muted">
+                      {totalBooksCount} total | {checkedOutBooksCount} checked out (borrowed)
+                    </p>
+                  </article>
 
                 <form
                   className="filters catalog-filters"
@@ -1279,8 +1314,8 @@ const App = () => {
                     Availability
                     <select value={availableFilter} onChange={(event) => setAvailableFilter(event.target.value)}>
                       <option value="all">All</option>
-                      <option value="available">Available</option>
-                      <option value="unavailable">Checked out</option>
+                      <option value="available">Checked in (returned)</option>
+                      <option value="unavailable">Checked out (borrowed)</option>
                     </select>
                   </label>
 
@@ -1475,7 +1510,7 @@ const App = () => {
                           </header>
                         </div>
                         <p className={`status-pill ${book.available ? "available" : "unavailable"}`}>
-                          {book.available ? "Available" : "Checked out"}
+                          {book.available ? "Checked in (returned)" : "Checked out (borrowed)"}
                         </p>
                         <p className="book-genre">{truncateText(book.genre ?? "Uncategorized", 80)}</p>
                         <p className="muted clamp-3">
@@ -1489,16 +1524,23 @@ const App = () => {
                             Preview
                           </button>
                           {book.available ? (
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() => void checkoutBook(book.id)}
-                              disabled={!canBorrow}
-                            >
-                              {canBorrow ? "Borrow" : "Sign in to borrow"}
-                            </button>
+                            (() => {
+                              const isPending = checkoutPendingIds.includes(book.id);
+                              return (
+                                <button
+                                  className={`btn${isPending ? " is-loading" : ""}`}
+                                  type="button"
+                                  onClick={() => void checkoutBook(book.id)}
+                                  disabled={!canBorrow || isPending}
+                                  aria-busy={isPending}
+                                  aria-label={isPending ? "Borrowing in progress" : canBorrow ? "Borrow" : "Sign in"}
+                                >
+                                  {canBorrow ? "Borrow" : "Sign in"}
+                                </button>
+                              );
+                            })()
                           ) : (
-                            <span className="muted">Currently borrowed</span>
+                            <span className="muted">Currently checked out (borrowed)</span>
                           )}
                           {canManageBooks && (
                             <>
@@ -1552,16 +1594,23 @@ const App = () => {
                           {truncateText(book.genre ?? "General", 100)}
                         </p>
                         {book.available && (
-                          <button
-                            className="btn shelf-btn"
-                            type="button"
-                            onClick={() => void checkoutBook(book.id)}
-                            disabled={!canBorrow}
-                          >
-                            {canBorrow ? "Borrow" : "Sign in to borrow"}
-                          </button>
+                          (() => {
+                            const isPending = checkoutPendingIds.includes(book.id);
+                            return (
+                              <button
+                                className={`btn shelf-btn${isPending ? " is-loading" : ""}`}
+                                type="button"
+                                onClick={() => void checkoutBook(book.id)}
+                                disabled={!canBorrow || isPending}
+                                aria-busy={isPending}
+                                aria-label={isPending ? "Borrowing in progress" : canBorrow ? "Borrow" : "Sign in"}
+                              >
+                                {canBorrow ? "Borrow" : "Sign in"}
+                              </button>
+                            );
+                          })()
                         )}
-                        {!book.available && <p className="muted shelf-status">Checked out</p>}
+                        {!book.available && <p className="muted shelf-status">Checked out (borrowed)</p>}
                       </article>
                     ))}
                   </div>

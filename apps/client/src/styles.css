@@ -372,6 +372,9 @@ label {
   color: #1d2b38;
   cursor: pointer;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn:hover {
@@ -381,6 +384,23 @@ label {
 .btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.btn.is-loading::after {
+  content: "";
+  width: 0.78rem;
+  height: 0.78rem;
+  margin-left: 0.42rem;
+  border-radius: 50%;
+  border: 2px solid rgba(29, 43, 56, 0.35);
+  border-top-color: #1d2b38;
+  animation: btn-spin 0.75s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-outline {

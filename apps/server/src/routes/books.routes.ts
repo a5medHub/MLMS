@@ -195,7 +195,7 @@ router.get(
     const runPrimaryQuery = async () => {
       const books = await prisma.book.findMany({
         where,
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        orderBy: [{ available: "desc" }, { createdAt: "desc" }, { id: "desc" }],
         take: query.limit + 1,
         ...(query.cursor ? { skip: 1, cursor: { id: query.cursor } } : {})
       });
@@ -205,7 +205,7 @@ router.get(
     const runLegacyQuery = async () => {
       const books = await prisma.book.findMany({
         where,
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        orderBy: [{ available: "desc" }, { createdAt: "desc" }, { id: "desc" }],
         take: query.limit + 1,
         ...(query.cursor ? { skip: 1, cursor: { id: query.cursor } } : {}),
         select: {
