@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: mlms-api
+    runtime: node
+    rootDir: .
+    buildCommand: npm install && npm run build -w apps/api
+    startCommand: npm run db:push -w apps/api && npm run start -w apps/api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAME_SITE
+        value: none
+      - key: COOKIE_DOMAIN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  - type: static
+    name: mlms-web
+    rootDir: .
+    buildCommand: npm install && npm run build -w apps/web
+    staticPublishPath: apps/web/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false
