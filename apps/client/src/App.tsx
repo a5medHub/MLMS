@@ -1465,7 +1465,9 @@ const App = () => {
                           <BookCover book={book} className="book-cover-thumb" />
                           <header>
                             <div className="title-row">
-                              <h3>{book.title}</h3>
+                              <h3 className="book-title" title={book.title}>
+                                {truncateText(book.title, 120)}
+                              </h3>
                               <AiMetadataBadge book={book} />
                             </div>
                             <p className="muted">{book.author}</p>
@@ -1515,7 +1517,7 @@ const App = () => {
 
                   {hasNextPage && (
                     <button
-                      className="btn btn-outline"
+                      className="btn btn-outline load-more-btn"
                       type="button"
                       onClick={() => void loadBooks(nextCursor)}
                       disabled={!nextCursor}

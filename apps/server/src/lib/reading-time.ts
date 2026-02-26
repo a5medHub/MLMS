@@ -6,7 +6,7 @@ type EstimateDueDateInput = {
   isbn?: string | null;
 };
 
-type DueDateEstimate = {
+export type DueDateEstimate = {
   dueAt: Date;
   days: number;
   source: "google_books" | "openlibrary" | "fallback";
@@ -17,6 +17,8 @@ const timeoutMs = 9000;
 const minimumDays = 14;
 const maximumDays = 45;
 const fallbackDays = 30;
+const estimateCacheTtlMs = 24 * 60 * 60 * 1000;
+const estimateCache = new Map<string, { expiresAt: number; value: DueDateEstimate }>();
 
 const normalize = (value: string): string => {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -70,6 +72,15 @@ const clampDays = (days: number): number => {
 
 const buildDueDate = (days: number): Date => {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+};
+
+const buildFallbackEstimate = (): DueDateEstimate => {
+  return {
+    dueAt: buildDueDate(fallbackDays),
+    days: fallbackDays,
+    source: "fallback",
+    pageCount: null
+  };
 };
 
 const findGooglePageCount = async (input: EstimateDueDateInput): Promise<{ pageCount: number; category: string | null } | null> => {
@@ -184,33 +195,49 @@ const findOpenLibraryPageCount = async (input: EstimateDueDateInput): Promise<nu
 };
 
 export const estimateLoanDueDate = async (input: EstimateDueDateInput): Promise<DueDateEstimate> => {
+  const cacheKey = `${normalize(input.title)}|${normalize(input.author)}|${normalize(input.isbn ?? "")}`;
+  const cached = estimateCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
   const google = await findGooglePageCount(input);
   if (google) {
     const pagesPerDay = estimatePagesPerDay(google.category);
     const days = clampDays(google.pageCount / pagesPerDay);
-    return {
+    const result: DueDateEstimate = {
       dueAt: buildDueDate(days),
       days,
       source: "google_books",
       pageCount: google.pageCount
     };
+    estimateCache.set(cacheKey, {
+      expiresAt: Date.now() + estimateCacheTtlMs,
+      value: result
+    });
+    return result;
   }
 
   const openLibraryPages = await findOpenLibraryPageCount(input);
   if (openLibraryPages) {
     const days = clampDays(openLibraryPages / 35);
-    return {
+    const result: DueDateEstimate = {
       dueAt: buildDueDate(days),
       days,
       source: "openlibrary",
       pageCount: openLibraryPages
     };
+    estimateCache.set(cacheKey, {
+      expiresAt: Date.now() + estimateCacheTtlMs,
+      value: result
+    });
+    return result;
   }
 
-  return {
-    dueAt: buildDueDate(fallbackDays),
-    days: fallbackDays,
-    source: "fallback",
-    pageCount: null
-  };
+  const fallback = buildFallbackEstimate();
+  estimateCache.set(cacheKey, {
+    expiresAt: Date.now() + estimateCacheTtlMs,
+    value: fallback
+  });
+  return fallback;
 };

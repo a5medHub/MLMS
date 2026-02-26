@@ -702,7 +702,18 @@ label {
 .title-row > .shelf-title {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.book-title {
+  margin: 0.05rem 0 0.12rem;
+  line-height: 1.28;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 3.85rem;
 }
 
 .ai-badge {
@@ -732,6 +743,29 @@ label {
 
 .book-card-actions .muted {
   grid-column: 1 / -1;
+}
+
+.load-more-btn {
+  margin: 1rem auto 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 170px;
+  padding: 0.72rem 1.15rem;
+  border-radius: 999px;
+  border: 1px solid #d3bf96;
+  background: linear-gradient(180deg, #fff7e8 0%, #fde7c3 100%);
+  color: #213346;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px rgba(25, 35, 50, 0.12);
+}
+
+.load-more-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(25, 35, 50, 0.16);
+  border-color: #c9a870;
+  background: linear-gradient(180deg, #fff4de 0%, #fcdca9 100%);
 }
 
 .shelf-author {

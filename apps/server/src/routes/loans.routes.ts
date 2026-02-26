@@ -4,7 +4,7 @@ import { prisma } from "../db/prisma";
 import { asyncHandler } from "../lib/async-handler";
 import { createAuditLog } from "../lib/audit";
 import { HttpError } from "../lib/errors";
-import { estimateLoanDueDate } from "../lib/reading-time";
+import { estimateLoanDueDate, type DueDateEstimate } from "../lib/reading-time";
 import { requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
@@ -17,6 +17,8 @@ const loanUserSelect = {
   phoneNumber: true,
   personalId: true
 } as const;
+const fallbackLoanDays = 30;
+const dueEstimateWaitMs = 1200;
 
 const checkoutSchema = z.object({
   bookId: z.string().min(1),
@@ -32,6 +34,12 @@ const updateDueDateSchema = z.object({
 });
 
 const toDateOnly = (date: Date): string => date.toISOString().slice(0, 10);
+const buildFallbackDueEstimate = (): DueDateEstimate => ({
+  dueAt: new Date(Date.now() + fallbackLoanDays * 24 * 60 * 60 * 1000),
+  days: fallbackLoanDays,
+  source: "fallback",
+  pageCount: null
+});
 
 router.get(
   "/",
@@ -185,11 +193,16 @@ router.post(
 
     const dueEstimate = payload.dueAt
       ? null
-      : await estimateLoanDueDate({
-          title: book.title,
-          author: book.author,
-          isbn: book.isbn
-        });
+      : await Promise.race<DueDateEstimate>([
+          estimateLoanDueDate({
+            title: book.title,
+            author: book.author,
+            isbn: book.isbn
+          }).catch(() => buildFallbackDueEstimate()),
+          new Promise<DueDateEstimate>((resolve) => {
+            setTimeout(() => resolve(buildFallbackDueEstimate()), dueEstimateWaitMs);
+          })
+        ]);
     const dueAt = payload.dueAt ?? dueEstimate?.dueAt;
 
     const loan = await prisma.$transaction(async (tx) => {
