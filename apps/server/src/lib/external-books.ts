@@ -235,6 +235,37 @@ export const persistExternalBooks = async (
   let createdCount = 0;
   let reusedCount = 0;
 
+  const enrichExistingBook = async (
+    existing: Awaited<ReturnType<typeof prisma.book.create>>,
+    candidate: ExternalBookCandidate
+  ) => {
+    const patch: Record<string, string | number | null> = {};
+    if (!existing.coverUrl && candidate.coverUrl) {
+      patch.coverUrl = candidate.coverUrl;
+    }
+    if (!existing.description && candidate.description) {
+      patch.description = candidate.description;
+    }
+    if (!existing.genre && candidate.genre) {
+      patch.genre = candidate.genre;
+    }
+    if (!existing.publishedYear && candidate.publishedYear) {
+      patch.publishedYear = candidate.publishedYear;
+    }
+    if (!existing.isbn && candidate.isbn) {
+      patch.isbn = candidate.isbn;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return existing;
+    }
+
+    return prisma.book.update({
+      where: { id: existing.id },
+      data: patch
+    });
+  };
+
   for (const candidate of dedupeCandidates(candidates)) {
     const existingByIsbn = candidate.isbn
       ? await prisma.book.findUnique({
@@ -243,7 +274,8 @@ export const persistExternalBooks = async (
       : null;
 
     if (existingByIsbn) {
-      books.push(existingByIsbn);
+      const enriched = await enrichExistingBook(existingByIsbn, candidate);
+      books.push(enriched);
       reusedCount += 1;
       continue;
     }
@@ -256,7 +288,8 @@ export const persistExternalBooks = async (
     });
 
     if (existingByTitleAuthor) {
-      books.push(existingByTitleAuthor);
+      const enriched = await enrichExistingBook(existingByTitleAuthor, candidate);
+      books.push(enriched);
       reusedCount += 1;
       continue;
     }

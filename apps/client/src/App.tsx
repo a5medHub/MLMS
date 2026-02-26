@@ -25,6 +25,8 @@ type SearchFallbackResponse = {
   };
 };
 
+type ImportProvider = "auto" | "openlibrary" | "google";
+
 const emptyBookForm = {
   title: "",
   author: "",
@@ -48,6 +50,136 @@ const parseApiError = (error: unknown): string => {
 const toNullableText = (value: string): string | null => {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const getBookCoverCandidates = (book: Book): string[] => {
+  const candidates: string[] = [];
+  if (book.coverUrl) {
+    candidates.push(book.coverUrl);
+  }
+  if (book.isbn) {
+    candidates.push(`https://covers.openlibrary.org/b/isbn/${book.isbn}-L.jpg`);
+  }
+  const googleQuery = encodeURIComponent(`intitle:${book.title} inauthor:${book.author}`);
+  candidates.push(`https://books.google.com/books/content?printsec=frontcover&img=1&zoom=1&source=gbs_api&q=${googleQuery}`);
+  return [...new Set(candidates)];
+};
+
+const BookCover = ({ book, className }: { book: Book; className: string }) => {
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const coverCandidates = useMemo(() => getBookCoverCandidates(book), [book]);
+
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [book]);
+
+  const fallbackLabel = book.title
+    .split(" ")
+    .filter((part) => part.length > 0)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+
+  if (coverCandidates.length === 0 || candidateIndex >= coverCandidates.length) {
+    return <div className={`${className} cover-fallback`}>{fallbackLabel || "BK"}</div>;
+  }
+
+  return (
+    <img
+      className={className}
+      src={coverCandidates[candidateIndex]}
+      alt={`Cover of ${book.title}`}
+      loading="lazy"
+      onError={() => setCandidateIndex((current) => current + 1)}
+    />
+  );
+};
+
+const BookPreviewDialog = ({
+  book,
+  onClose,
+  onCheckout
+}: {
+  book: Book | null;
+  onClose: () => void;
+  onCheckout: (bookId: string) => Promise<void>;
+}) => {
+  useEffect(() => {
+    if (!book) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [book, onClose]);
+
+  if (!book) {
+    return null;
+  }
+
+  const externalInfoUrl = `https://openlibrary.org/search?q=${encodeURIComponent(`${book.title} ${book.author}`)}`;
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="book-preview-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <h2 id="book-preview-title">Book preview</h2>
+          <button className="btn btn-outline" type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <div className="modal-content">
+          <BookCover book={book} className="book-cover-large" />
+          <div className="modal-info">
+            <h3>{book.title}</h3>
+            <p className="muted">{book.author}</p>
+            <p>
+              <strong>Genre:</strong> {book.genre ?? "Uncategorized"}
+            </p>
+            <p>
+              <strong>Published:</strong> {book.publishedYear ?? "Unknown"}
+            </p>
+            <p>
+              <strong>ISBN:</strong> {book.isbn ?? "N/A"}
+            </p>
+            <p className="book-description">
+              {book.description ??
+                "No summary available for this book yet. Try importing from Google Books for richer metadata."}
+            </p>
+            <a className="text-link" href={externalInfoUrl} target="_blank" rel="noreferrer">
+              More details
+            </a>
+            <div className="row-actions">
+              {book.available ? (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    void onCheckout(book.id);
+                    onClose();
+                  }}
+                >
+                  Borrow this book
+                </button>
+              ) : (
+                <span className="muted">This book is currently borrowed.</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 };
 
 const LoginScreen = ({
@@ -143,7 +275,9 @@ const App = () => {
   const [availableFilter, setAvailableFilter] = useState("all");
   const [importQuery, setImportQuery] = useState("popular fiction");
   const [importLimit, setImportLimit] = useState("50");
+  const [importProvider, setImportProvider] = useState<ImportProvider>("auto");
   const [importingExternal, setImportingExternal] = useState(false);
+  const [previewBook, setPreviewBook] = useState<Book | null>(null);
   const [showBookEditor, setShowBookEditor] = useState(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookForm, setBookForm] = useState(emptyBookForm);
@@ -452,13 +586,15 @@ const App = () => {
         body: {
           query: importQuery,
           limit: limitNumber,
-          provider: "auto"
+          provider: importProvider
         }
       });
 
       const importedCount = response.meta?.importedCount ?? response.data.length;
       const existingCount = response.meta?.existingCount ?? 0;
-      setMessage(`Import finished. Added ${importedCount} new books, reused ${existingCount} existing.`);
+      setMessage(
+        `Import finished from ${importProvider}. Added ${importedCount} new books, reused ${existingCount} existing.`
+      );
       await loadBooks();
     } catch (error) {
       setMessage(parseApiError(error));
@@ -569,6 +705,17 @@ const App = () => {
                     onChange={(event) => setImportLimit(event.target.value)}
                   />
                 </label>
+                <label>
+                  Source
+                  <select
+                    value={importProvider}
+                    onChange={(event) => setImportProvider(event.target.value as ImportProvider)}
+                  >
+                    <option value="auto">Auto (Open Library then Google fallback)</option>
+                    <option value="openlibrary">Open Library only</option>
+                    <option value="google">Google Books only</option>
+                  </select>
+                </label>
                 <button className="btn" type="button" onClick={() => void importFromExternal()} disabled={importingExternal}>
                   {importingExternal ? "Importing..." : "Import from APIs"}
                 </button>
@@ -651,16 +798,24 @@ const App = () => {
           <div className="book-grid">
             {books.map((book) => (
               <article className="book-card" key={book.id}>
-                <header>
-                  <h3>{book.title}</h3>
-                  <p className="muted">{book.author}</p>
-                </header>
+                <div className="book-card-head">
+                  <BookCover book={book} className="book-cover-thumb" />
+                  <header>
+                    <h3>{book.title}</h3>
+                    <p className="muted">{book.author}</p>
+                  </header>
+                </div>
                 <p className={`status-pill ${book.available ? "available" : "unavailable"}`}>
                   {book.available ? "Available" : "Checked out"}
                 </p>
                 <p>{book.genre ?? "Uncategorized"}</p>
-                {book.description && <p className="muted">{book.description}</p>}
+                <p className="muted clamp-3">
+                  {book.description ?? "No description yet. Click Preview to view more details."}
+                </p>
                 <div className="row-actions">
+                  <button className="btn btn-outline" type="button" onClick={() => setPreviewBook(book)}>
+                    Preview
+                  </button>
                   {book.available ? (
                     <button className="btn" type="button" onClick={() => void checkoutBook(book.id)}>
                       Check out
@@ -796,6 +951,7 @@ const App = () => {
           </section>
         )}
       </main>
+      <BookPreviewDialog book={previewBook} onClose={() => setPreviewBook(null)} onCheckout={checkoutBook} />
     </>
   );
 };
