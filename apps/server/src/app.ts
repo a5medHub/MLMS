@@ -16,7 +16,12 @@ app.use(
     credentials: true
   })
 );
-app.use(helmet());
+app.use(
+  helmet({
+    // Required for popup-based Google sign-in postMessage flow.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+  })
+);
 app.use(morgan("combined"));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());

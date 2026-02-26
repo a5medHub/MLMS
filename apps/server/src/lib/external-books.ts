@@ -21,6 +21,16 @@ type SearchExternalBooksResult = {
   fallbackUsed: boolean;
 };
 
+type LocalBook = Awaited<ReturnType<typeof prisma.book.create>>;
+
+type MetadataPatch = {
+  coverUrl?: string;
+  description?: string;
+  genre?: string;
+  publishedYear?: number;
+  isbn?: string;
+};
+
 const requestTimeoutMs = 9000;
 
 const normalizeText = (value: unknown): string | null => {
@@ -191,6 +201,123 @@ const dedupeCandidates = (candidates: ExternalBookCandidate[]): ExternalBookCand
   return output;
 };
 
+const normalizeForCompare = (value: string): string => {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+};
+
+const buildMetadataPatch = (existing: LocalBook, candidate: ExternalBookCandidate): MetadataPatch => {
+  const patch: MetadataPatch = {};
+  if (!existing.coverUrl && candidate.coverUrl) {
+    patch.coverUrl = candidate.coverUrl;
+  }
+  if (!existing.description && candidate.description) {
+    patch.description = candidate.description;
+  }
+  if (!existing.genre && candidate.genre) {
+    patch.genre = candidate.genre;
+  }
+  if (!existing.publishedYear && candidate.publishedYear) {
+    patch.publishedYear = candidate.publishedYear;
+  }
+  if (!existing.isbn && candidate.isbn) {
+    patch.isbn = candidate.isbn;
+  }
+  return patch;
+};
+
+const needsMetadataEnrichment = (book: LocalBook): boolean => {
+  return !book.coverUrl || !book.description || !book.genre || !book.publishedYear || !book.isbn;
+};
+
+const candidateScore = (book: LocalBook, candidate: ExternalBookCandidate): number => {
+  let score = 0;
+  const titleA = normalizeForCompare(book.title);
+  const titleB = normalizeForCompare(candidate.title);
+  const authorA = normalizeForCompare(book.author);
+  const authorB = normalizeForCompare(candidate.author);
+
+  if (book.isbn && candidate.isbn) {
+    if (book.isbn === candidate.isbn) {
+      score += 100;
+    } else {
+      score -= 30;
+    }
+  }
+
+  if (titleA === titleB) {
+    score += 40;
+  } else if (titleA && titleB && (titleA.includes(titleB) || titleB.includes(titleA))) {
+    score += 20;
+  }
+
+  if (authorA === authorB) {
+    score += 25;
+  } else if (authorA && authorB && (authorA.includes(authorB) || authorB.includes(authorA))) {
+    score += 10;
+  }
+
+  const patch = buildMetadataPatch(book, candidate);
+  score += Object.keys(patch).length * 6;
+  return score;
+};
+
+const queryByProvider = async (
+  query: string,
+  limit: number,
+  provider: SearchProvider
+): Promise<ExternalBookCandidate[]> => {
+  if (provider === "openlibrary") {
+    return dedupeCandidates(await searchOpenLibrary(query, limit));
+  }
+  if (provider === "google") {
+    return dedupeCandidates(await searchGoogleBooks(query, limit));
+  }
+
+  // For metadata enrichment quality, prefer Google first then Open Library fallback.
+  const google = await searchGoogleBooks(query, limit);
+  if (google.length > 0) {
+    return dedupeCandidates(google);
+  }
+  return dedupeCandidates(await searchOpenLibrary(query, limit));
+};
+
+const findBestCandidateForBook = async (
+  book: LocalBook,
+  provider: SearchProvider
+): Promise<ExternalBookCandidate | null> => {
+  const attempts: string[] = [];
+  if (book.isbn) {
+    attempts.push(`isbn:${book.isbn}`);
+  }
+  attempts.push(`${book.title} ${book.author}`);
+  attempts.push(book.title);
+
+  let best: ExternalBookCandidate | null = null;
+  let bestScore = -Infinity;
+
+  for (const query of attempts) {
+    const candidates = await queryByProvider(query, 10, provider);
+    for (const candidate of candidates) {
+      const score = candidateScore(book, candidate);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    if (best && bestScore >= 25) {
+      return best;
+    }
+  }
+
+  if (best && bestScore >= 18) {
+    return best;
+  }
+  return null;
+};
+
 export const searchExternalBooks = async (
   query: string,
   limit: number,
@@ -231,31 +358,12 @@ export const searchExternalBooks = async (
 export const persistExternalBooks = async (
   candidates: ExternalBookCandidate[]
 ): Promise<{ books: Array<Awaited<ReturnType<typeof prisma.book.create>>>; createdCount: number; reusedCount: number }> => {
-  const books: Array<Awaited<ReturnType<typeof prisma.book.create>>> = [];
+  const books: LocalBook[] = [];
   let createdCount = 0;
   let reusedCount = 0;
 
-  const enrichExistingBook = async (
-    existing: Awaited<ReturnType<typeof prisma.book.create>>,
-    candidate: ExternalBookCandidate
-  ) => {
-    const patch: Record<string, string | number | null> = {};
-    if (!existing.coverUrl && candidate.coverUrl) {
-      patch.coverUrl = candidate.coverUrl;
-    }
-    if (!existing.description && candidate.description) {
-      patch.description = candidate.description;
-    }
-    if (!existing.genre && candidate.genre) {
-      patch.genre = candidate.genre;
-    }
-    if (!existing.publishedYear && candidate.publishedYear) {
-      patch.publishedYear = candidate.publishedYear;
-    }
-    if (!existing.isbn && candidate.isbn) {
-      patch.isbn = candidate.isbn;
-    }
-
+  const enrichExistingBook = async (existing: LocalBook, candidate: ExternalBookCandidate) => {
+    const patch = buildMetadataPatch(existing, candidate);
     if (Object.keys(patch).length === 0) {
       return existing;
     }
@@ -329,4 +437,74 @@ export const persistExternalBooks = async (
   }
 
   return { books, createdCount, reusedCount };
+};
+
+export const enrichLibraryMetadata = async (options: {
+  limit: number;
+  provider: SearchProvider;
+  onlyMissing: boolean;
+}): Promise<{
+  processed: number;
+  updatedCount: number;
+  skippedCount: number;
+  noMatchCount: number;
+  failedCount: number;
+}> => {
+  const books = await prisma.book.findMany({
+    where: options.onlyMissing
+      ? {
+          OR: [
+            { coverUrl: null },
+            { description: null },
+            { genre: null },
+            { publishedYear: null },
+            { isbn: null }
+          ]
+        }
+      : {},
+    orderBy: [{ updatedAt: "asc" }],
+    take: options.limit
+  });
+
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let noMatchCount = 0;
+  let failedCount = 0;
+
+  for (const book of books) {
+    try {
+      if (options.onlyMissing && !needsMetadataEnrichment(book)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      const candidate = await findBestCandidateForBook(book, options.provider);
+      if (!candidate) {
+        noMatchCount += 1;
+        continue;
+      }
+
+      const patch = buildMetadataPatch(book, candidate);
+      if (Object.keys(patch).length === 0) {
+        skippedCount += 1;
+        continue;
+      }
+
+      await prisma.book.update({
+        where: { id: book.id },
+        data: patch
+      });
+      updatedCount += 1;
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  return {
+    processed: books.length,
+    updatedCount,
+    skippedCount,
+    noMatchCount,
+    failedCount
+  };
 };

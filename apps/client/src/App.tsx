@@ -25,6 +25,17 @@ type SearchFallbackResponse = {
   };
 };
 
+type EnrichMetadataResponse = {
+  meta: {
+    providerUsed: string;
+    processed: number;
+    updatedCount: number;
+    skippedCount: number;
+    noMatchCount: number;
+    failedCount: number;
+  };
+};
+
 type ImportProvider = "auto" | "openlibrary" | "google";
 
 const emptyBookForm = {
@@ -277,6 +288,8 @@ const App = () => {
   const [importLimit, setImportLimit] = useState("50");
   const [importProvider, setImportProvider] = useState<ImportProvider>("auto");
   const [importingExternal, setImportingExternal] = useState(false);
+  const [enrichLimit, setEnrichLimit] = useState("200");
+  const [enrichingMetadata, setEnrichingMetadata] = useState(false);
   const [previewBook, setPreviewBook] = useState<Book | null>(null);
   const [showBookEditor, setShowBookEditor] = useState(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
@@ -603,6 +616,35 @@ const App = () => {
     }
   };
 
+  const enrichLibraryMetadata = async () => {
+    try {
+      setEnrichingMetadata(true);
+      const limitNumber = Number(enrichLimit);
+      if (!Number.isFinite(limitNumber) || limitNumber < 1 || limitNumber > 500) {
+        setMessage("Enrichment limit must be between 1 and 500.");
+        return;
+      }
+
+      const response = await authRequest<EnrichMetadataResponse>("/books/enrich-metadata", {
+        method: "POST",
+        body: {
+          limit: limitNumber,
+          provider: importProvider,
+          onlyMissing: true
+        }
+      });
+
+      setMessage(
+        `Enrichment done (${response.meta.providerUsed}). Updated ${response.meta.updatedCount}/${response.meta.processed}, unmatched ${response.meta.noMatchCount}, failed ${response.meta.failedCount}.`
+      );
+      await loadBooks();
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setEnrichingMetadata(false);
+    }
+  };
+
   if (booting) {
     return (
       <main className="auth-shell">
@@ -718,6 +760,26 @@ const App = () => {
                 </label>
                 <button className="btn" type="button" onClick={() => void importFromExternal()} disabled={importingExternal}>
                   {importingExternal ? "Importing..." : "Import from APIs"}
+                </button>
+              </div>
+              <div className="import-actions">
+                <label>
+                  Enrich existing books (1-500)
+                  <input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={enrichLimit}
+                    onChange={(event) => setEnrichLimit(event.target.value)}
+                  />
+                </label>
+                <button
+                  className="btn btn-outline"
+                  type="button"
+                  onClick={() => void enrichLibraryMetadata()}
+                  disabled={enrichingMetadata}
+                >
+                  {enrichingMetadata ? "Enriching..." : "Enrich metadata"}
                 </button>
               </div>
             </section>

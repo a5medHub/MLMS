@@ -4,7 +4,7 @@ import { prisma } from "../db/prisma";
 import { asyncHandler } from "../lib/async-handler";
 import { createAuditLog } from "../lib/audit";
 import { HttpError } from "../lib/errors";
-import { persistExternalBooks, searchExternalBooks } from "../lib/external-books";
+import { enrichLibraryMetadata, persistExternalBooks, searchExternalBooks } from "../lib/external-books";
 import { requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
@@ -130,6 +130,49 @@ router.post(
         fallbackUsed: externalResult.fallbackUsed,
         importedCount: persisted.createdCount,
         existingCount: persisted.reusedCount
+      }
+    });
+  })
+);
+
+router.post(
+  "/enrich-metadata",
+  requireAuth,
+  requireRole(["ADMIN"]),
+  asyncHandler(async (req, res) => {
+    const payload = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(500).default(200),
+        provider: z.enum(["auto", "openlibrary", "google"]).default("auto"),
+        onlyMissing: z
+          .union([z.boolean(), z.literal("true"), z.literal("false")])
+          .optional()
+          .transform((value) => value === undefined || value === true || value === "true")
+      })
+      .parse(req.body ?? {});
+
+    const result = await enrichLibraryMetadata({
+      limit: payload.limit,
+      provider: payload.provider,
+      onlyMissing: payload.onlyMissing
+    });
+
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "BOOK_METADATA_ENRICH",
+      entity: "BOOK",
+      metadata: {
+        limit: payload.limit,
+        provider: payload.provider,
+        onlyMissing: payload.onlyMissing,
+        ...result
+      }
+    });
+
+    res.status(200).json({
+      meta: {
+        providerUsed: payload.provider,
+        ...result
       }
     });
   })

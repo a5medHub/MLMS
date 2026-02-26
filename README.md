@@ -83,6 +83,7 @@ Base path: `/api/v1`
 - `GET /books` - search/list books (cursor pagination)
 - `POST /books` - create book (`ADMIN`)
 - `POST /books/import/external` - import books from Open Library with Google fallback (`ADMIN`)
+- `POST /books/enrich-metadata` - enrich existing books metadata (`ADMIN`)
 - `PATCH /books/:bookId` - update book (`ADMIN`)
 - `DELETE /books/:bookId` - delete book (`ADMIN`)
 - `POST /loans/checkout` - borrow a book
