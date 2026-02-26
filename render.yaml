@@ -3,7 +3,7 @@ services:
     name: mlms-api
     runtime: node
     rootDir: .
-    buildCommand: npm install && npm run build -w apps/api
+    buildCommand: npm ci --include=dev && npm run build -w apps/api
     startCommand: npm run db:push -w apps/api && npm run start -w apps/api
     healthCheckPath: /health
     envVars:
@@ -35,7 +35,7 @@ services:
   - type: static
     name: mlms-web
     rootDir: .
-    buildCommand: npm install && npm run build -w apps/web
+    buildCommand: npm ci --include=dev && npm run build -w apps/web
     staticPublishPath: apps/web/dist
     envVars:
       - key: VITE_API_BASE_URL
