@@ -237,6 +237,40 @@ router.get(
   })
 );
 
+router.get(
+  "/stats",
+  asyncHandler(async (_req, res) => {
+    try {
+      const [totalBooks, availableBooks, activeLoans] = await Promise.all([
+        prisma.book.count(),
+        prisma.book.count({ where: { available: true } }),
+        prisma.loan.count({ where: { returnedAt: null } })
+      ]);
+
+      res.status(200).json({
+        data: {
+          totalBooks,
+          availableBooks,
+          checkedOutBooks: Math.max(0, totalBooks - availableBooks),
+          activeLoans
+        }
+      });
+      return;
+    } catch {
+      const availableBooks = FALLBACK_BOOKS.filter((book) => book.available).length;
+      const totalBooks = FALLBACK_BOOKS.length;
+      res.status(200).json({
+        data: {
+          totalBooks,
+          availableBooks,
+          checkedOutBooks: Math.max(0, totalBooks - availableBooks),
+          activeLoans: 0
+        }
+      });
+    }
+  })
+);
+
 router.post(
   "/import/external",
   requireAuth,

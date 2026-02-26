@@ -21,7 +21,36 @@ app.use(
 app.use(
   helmet({
     // Required for popup-based Google sign-in postMessage flow.
-    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://accounts.google.com", "https://apis.google.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+        imgSrc: [
+          "'self'",
+          "data:",
+          "https://books.google.com",
+          "http://books.google.com",
+          "https://covers.openlibrary.org",
+          "http://covers.openlibrary.org",
+          "https://*.googleusercontent.com",
+          "https://lh3.googleusercontent.com"
+        ],
+        connectSrc: [
+          "'self'",
+          "https://accounts.google.com",
+          "https://www.googleapis.com",
+          "https://openlibrary.org",
+          "https://covers.openlibrary.org"
+        ],
+        frameSrc: ["'self'", "https://accounts.google.com"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'self'"]
+      }
+    }
   })
 );
 app.use(morgan("combined"));

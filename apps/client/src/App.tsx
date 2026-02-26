@@ -15,6 +15,15 @@ type BooksResponse = {
   };
 };
 
+type LibraryStatsResponse = {
+  data: {
+    totalBooks: number;
+    availableBooks: number;
+    checkedOutBooks: number;
+    activeLoans: number;
+  };
+};
+
 type SearchFallbackResponse = {
   data: Book[];
   meta?: {
@@ -445,6 +454,7 @@ const App = () => {
   const [hasNextPage, setHasNextPage] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [booksLoading, setBooksLoading] = useState(false);
+  const [libraryStats, setLibraryStats] = useState<LibraryStatsResponse["data"] | null>(null);
 
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loansLoading, setLoansLoading] = useState(false);
@@ -556,6 +566,15 @@ const App = () => {
     [availableFilter, query, user]
   );
 
+  const loadLibraryStats = useCallback(async () => {
+    try {
+      const result = await requestJson<LibraryStatsResponse>("/books/stats");
+      setLibraryStats(result.data);
+    } catch {
+      setLibraryStats(null);
+    }
+  }, []);
+
   const loadLoans = useCallback(async () => {
     setLoansLoading(true);
     try {
@@ -617,8 +636,8 @@ const App = () => {
   }, [authRequest, user?.role]);
 
   const refreshAfterLoanMutation = useCallback(async () => {
-    await Promise.all([loadBooks(), loadLoans(), loadRecommendations(), loadAdminOverview()]);
-  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations]);
+    await Promise.all([loadBooks(), loadLoans(), loadRecommendations(), loadAdminOverview(), loadLibraryStats()]);
+  }, [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadLibraryStats]);
 
   const bootAuth = useCallback(async () => {
     let token = tokenRef.current;
@@ -664,8 +683,8 @@ const App = () => {
     if (booting) {
       return;
     }
-    void Promise.all([loadBooks(), loadRecommendations()]);
-  }, [booting, loadBooks, loadRecommendations]);
+    void Promise.all([loadBooks(), loadRecommendations(), loadLibraryStats()]);
+  }, [booting, loadBooks, loadRecommendations, loadLibraryStats]);
 
   useEffect(() => {
     if (!user) {
@@ -721,6 +740,24 @@ const App = () => {
   }, [activeLoans, user]);
   const canManageBooks = user?.role === "ADMIN";
   const canBorrow = !!user;
+  const totalBooksCount = libraryStats?.totalBooks ?? books.length;
+  const availableBooksCount = libraryStats?.availableBooks ?? books.filter((book) => book.available).length;
+  const checkedOutBooksCount = libraryStats?.checkedOutBooks ?? Math.max(0, totalBooksCount - availableBooksCount);
+  const dueSoonCount = useMemo(() => {
+    if (!user) {
+      return 0;
+    }
+    const now = new Date();
+    const threshold = new Date(now);
+    threshold.setDate(now.getDate() + 3);
+    return myActiveLoans.filter((loan) => {
+      if (!loan.dueAt) {
+        return false;
+      }
+      const due = new Date(loan.dueAt);
+      return due >= now && due <= threshold;
+    }).length;
+  }, [myActiveLoans, user]);
 
   const openUserDashboard = useCallback(() => {
     if (!user) {
@@ -779,7 +816,7 @@ const App = () => {
         setMessage("Book created.");
       }
       resetBookForm();
-      await loadBooks();
+      await Promise.all([loadBooks(), loadLibraryStats()]);
     } catch (error) {
       setMessage(parseApiError(error));
     } finally {
@@ -808,7 +845,7 @@ const App = () => {
     try {
       await authRequest(`/books/${bookId}`, { method: "DELETE" });
       setMessage("Book deleted.");
-      await loadBooks();
+      await Promise.all([loadBooks(), loadLibraryStats()]);
     } catch (error) {
       setMessage(parseApiError(error));
     }
@@ -903,7 +940,7 @@ const App = () => {
       setMessage(
         `Import finished from ${importProvider}. Added ${importedCount} new books, reused ${existingCount} existing.`
       );
-      await loadBooks();
+      await Promise.all([loadBooks(), loadLibraryStats()]);
     } catch (error) {
       setMessage(parseApiError(error));
     } finally {
@@ -932,7 +969,7 @@ const App = () => {
       setMessage(
         `Enrichment done (${response.meta.providerUsed}). Updated ${response.meta.updatedCount}/${response.meta.processed}, unmatched ${response.meta.noMatchCount}, failed ${response.meta.failedCount}.`
       );
-      await loadBooks();
+      await Promise.all([loadBooks(), loadLibraryStats()]);
     } catch (error) {
       setMessage(parseApiError(error));
     } finally {
@@ -989,261 +1026,326 @@ const App = () => {
 
         {viewMode === "catalog" && (
           <>
-            <section className="panel" aria-labelledby="books-title">
-          <div className="panel-head">
-            <h2 id="books-title">Books</h2>
-            {canManageBooks && (
-              <button
-                className="btn"
-                type="button"
-                onClick={() => {
-                  setShowBookEditor((value) => !value);
-                  if (showBookEditor) {
-                    resetBookForm();
-                  }
-                }}
-              >
-                {showBookEditor ? "Close editor" : "Add a book"}
-              </button>
-            )}
-          </div>
-
-          <form
-            className="filters"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void loadBooks();
-            }}
-          >
-            <label>
-              Search by title, author, genre, ISBN
-              <input value={query} onChange={(event) => setQuery(event.target.value)} name="q" />
-            </label>
-
-            <label>
-              Availability
-              <select value={availableFilter} onChange={(event) => setAvailableFilter(event.target.value)}>
-                <option value="all">All</option>
-                <option value="available">Available</option>
-                <option value="unavailable">Checked out</option>
-              </select>
-            </label>
-
-            <button className="btn" type="submit" disabled={booksLoading}>
-              {booksLoading ? "Searching..." : "Apply filters"}
-            </button>
-          </form>
-
-          {canManageBooks && (
-            <section className="import-box" aria-labelledby="import-title">
-              <h3 id="import-title">Import books for testing</h3>
-              <p className="muted">Primary source: Open Library. Automatic fallback: Google Books when not found.</p>
-              <div className="import-grid">
-                <label>
-                  Query
-                  <input value={importQuery} onChange={(event) => setImportQuery(event.target.value)} />
-                </label>
-                <label>
-                  Limit (1-300)
-                  <input
-                    type="number"
-                    min={1}
-                    max={300}
-                    value={importLimit}
-                    onChange={(event) => setImportLimit(event.target.value)}
-                  />
-                </label>
-                <label>
-                  Source
-                  <select
-                    value={importProvider}
-                    onChange={(event) => setImportProvider(event.target.value as ImportProvider)}
-                  >
-                    <option value="auto">Auto (Open Library then Google fallback)</option>
-                    <option value="openlibrary">Open Library only</option>
-                    <option value="google">Google Books only</option>
-                  </select>
-                </label>
-                <button className="btn" type="button" onClick={() => void importFromExternal()} disabled={importingExternal}>
-                  {importingExternal ? "Importing..." : "Import from APIs"}
-                </button>
-              </div>
-              <div className="import-actions">
-                <label>
-                  Enrich existing books (1-500)
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={enrichLimit}
-                    onChange={(event) => setEnrichLimit(event.target.value)}
-                  />
-                </label>
-                <button
-                  className="btn btn-outline"
-                  type="button"
-                  onClick={() => void enrichLibraryMetadata()}
-                  disabled={enrichingMetadata}
-                >
-                  {enrichingMetadata ? "Enriching..." : "Enrich metadata"}
-                </button>
-              </div>
-            </section>
-          )}
-
-          {showBookEditor && canManageBooks && (
-            <section className="editor" aria-labelledby="editor-title">
-              <h3 id="editor-title">{editingBookId ? "Edit book" : "Add new book"}</h3>
-              <div className="editor-grid">
-                <label>
-                  Title
-                  <input
-                    value={bookForm.title}
-                    onChange={(event) => setBookForm((prev) => ({ ...prev, title: event.target.value }))}
-                    required
-                  />
-                </label>
-                <label>
-                  Author
-                  <input
-                    value={bookForm.author}
-                    onChange={(event) => setBookForm((prev) => ({ ...prev, author: event.target.value }))}
-                    required
-                  />
-                </label>
-                <label>
-                  ISBN
-                  <input
-                    value={bookForm.isbn}
-                    onChange={(event) => setBookForm((prev) => ({ ...prev, isbn: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Genre
-                  <input
-                    value={bookForm.genre}
-                    onChange={(event) => setBookForm((prev) => ({ ...prev, genre: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Published year
-                  <input
-                    type="number"
-                    min={0}
-                    max={2100}
-                    value={bookForm.publishedYear}
-                    onChange={(event) => setBookForm((prev) => ({ ...prev, publishedYear: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Cover URL
-                  <input
-                    type="url"
-                    value={bookForm.coverUrl}
-                    onChange={(event) => setBookForm((prev) => ({ ...prev, coverUrl: event.target.value }))}
-                  />
-                </label>
-                <label className="full-width">
-                  Description
-                  <textarea
-                    rows={3}
-                    value={bookForm.description}
-                    onChange={(event) => setBookForm((prev) => ({ ...prev, description: event.target.value }))}
-                  />
-                </label>
-              </div>
-              <div className="row-actions">
-                <button className="btn" type="button" disabled={submittingBook} onClick={() => void submitBook()}>
-                  {submittingBook ? "Saving..." : editingBookId ? "Save changes" : "Create book"}
-                </button>
-                <button className="btn btn-outline" type="button" onClick={resetBookForm}>
-                  Cancel
-                </button>
-              </div>
-            </section>
-          )}
-
-          <div className="book-grid storefront-grid">
-            {books.map((book) => (
-              <article className="book-card storefront-book-card" key={book.id}>
-                <div className="book-card-head storefront-book-head">
-                  <BookCover book={book} className="book-cover-thumb" />
-                  <header>
-                    <h3>{book.title}</h3>
-                    <p className="muted">{book.author}</p>
-                    <BookRating book={book} />
-                  </header>
-                </div>
-                <p className={`status-pill ${book.available ? "available" : "unavailable"}`}>
-                  {book.available ? "Available" : "Checked out"}
+            <section className="catalog-head-cards" aria-label="Catalog summary">
+              <article className="panel catalog-head-card">
+                <h3>Due soon</h3>
+                <p className="catalog-head-value">
+                  {user ? `${dueSoonCount} book${dueSoonCount === 1 ? "" : "s"}` : "Sign in to track"}
                 </p>
-                <p className="book-genre">{book.genre ?? "Uncategorized"}</p>
-                <p className="muted clamp-3">
-                  {book.description ?? "No description yet. Click Preview to view more details."}
-                </p>
-                <div className="row-actions book-card-actions">
-                  <button className="btn btn-outline" type="button" onClick={() => setPreviewBook(book)}>
-                    Preview
-                  </button>
-                  {book.available ? (
-                    <button className="btn" type="button" onClick={() => void checkoutBook(book.id)} disabled={!canBorrow}>
-                      {canBorrow ? "Borrow" : "Sign in to borrow"}
-                    </button>
-                  ) : (
-                    <span className="muted">Currently borrowed</span>
-                  )}
-                  {canManageBooks && (
-                    <>
-                      <button className="btn btn-outline" type="button" onClick={() => editBook(book)}>
-                        Edit
-                      </button>
-                      <button className="btn btn-danger" type="button" onClick={() => void deleteBook(book.id)}>
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </div>
+                <p className="muted">Due in the next 3 days</p>
               </article>
-            ))}
-          </div>
-
-          {hasNextPage && (
-            <button className="btn btn-outline" type="button" onClick={() => void loadBooks(nextCursor)} disabled={!nextCursor}>
-              Load more
-            </button>
-          )}
-        </section>
-
-        <section className="panel shelf-panel" aria-labelledby="ai-title">
-          <div className="panel-head">
-            <h2 id="ai-title">{user ? "Recommended for you" : "Popular picks"}</h2>
-          </div>
-          {recommendationsLoading && <p className="muted">Updating recommendations...</p>}
-          <div className="recommendation-shelf" role="list">
-            {recommendations.length === 0 && <p className="muted">No recommendations yet.</p>}
-            {recommendations.map((book) => (
-              <article key={book.id} className="shelf-card" role="listitem">
-                <BookCover book={book} className="book-cover-thumb shelf-cover" />
-                <h3 className="shelf-title" title={book.title}>
-                  {truncateText(book.title, 100)}
-                </h3>
-                <p className="muted shelf-author" title={book.author}>
-                  {truncateText(book.author, 70)}
+              <article className="panel catalog-head-card">
+                <h3>My loans</h3>
+                <p className="catalog-head-value">
+                  {user ? `${myActiveLoans.length} active` : "Guest browsing"}
                 </p>
-                <BookRating book={book} />
-                <p className="muted clamp-2 shelf-genre" title={book.genre ?? "General"}>
-                  {truncateText(book.genre ?? "General", 100)}
-                </p>
-                {book.available && (
-                  <button className="btn shelf-btn" type="button" onClick={() => void checkoutBook(book.id)} disabled={!canBorrow}>
-                    {canBorrow ? "Borrow" : "Sign in to borrow"}
+                <p className="muted">{user ? "Borrowed books in your account" : "Sign in only when borrowing"}</p>
+              </article>
+              <article className="panel catalog-head-card">
+                <h3>Recommendations</h3>
+                <p className="catalog-head-value">{recommendations.length} picks</p>
+                <p className="muted">{user ? "Based on your recent activity" : "Popular picks from the catalog"}</p>
+              </article>
+            </section>
+
+            <section className="catalog-workspace">
+              <aside className="panel catalog-sidebar" aria-label="Quick filters">
+                <article className="catalog-total-books">
+                  <p className="eyebrow">Library inventory</p>
+                  <h2>{availableBooksCount} books available</h2>
+                  <p className="muted">
+                    {totalBooksCount} total | {checkedOutBooksCount} checked out
+                  </p>
+                </article>
+
+                <form
+                  className="filters catalog-filters"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void loadBooks();
+                  }}
+                >
+                  <label>
+                    Search by title, author, genre, ISBN
+                    <input value={query} onChange={(event) => setQuery(event.target.value)} name="q" />
+                  </label>
+
+                  <label>
+                    Availability
+                    <select value={availableFilter} onChange={(event) => setAvailableFilter(event.target.value)}>
+                      <option value="all">All</option>
+                      <option value="available">Available</option>
+                      <option value="unavailable">Checked out</option>
+                    </select>
+                  </label>
+
+                  <button className="btn" type="submit" disabled={booksLoading}>
+                    {booksLoading ? "Searching..." : "Apply filters"}
+                  </button>
+                </form>
+
+                {canManageBooks && (
+                  <button
+                    className="btn btn-outline catalog-admin-toggle"
+                    type="button"
+                    onClick={() => {
+                      setShowBookEditor((value) => !value);
+                      if (showBookEditor) {
+                        resetBookForm();
+                      }
+                    }}
+                  >
+                    {showBookEditor ? "Close editor" : "Add a book"}
                   </button>
                 )}
-                {!book.available && <p className="muted shelf-status">Checked out</p>}
-              </article>
-            ))}
-          </div>
-        </section>
+              </aside>
+
+              <section className="catalog-main">
+                {canManageBooks && (
+                  <section className="import-box" aria-labelledby="import-title">
+                    <h3 id="import-title">Import books for testing</h3>
+                    <p className="muted">Primary source: Open Library. Automatic fallback: Google Books when not found.</p>
+                    <div className="import-grid">
+                      <label>
+                        Query
+                        <input value={importQuery} onChange={(event) => setImportQuery(event.target.value)} />
+                      </label>
+                      <label>
+                        Limit (1-300)
+                        <input
+                          type="number"
+                          min={1}
+                          max={300}
+                          value={importLimit}
+                          onChange={(event) => setImportLimit(event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Source
+                        <select
+                          value={importProvider}
+                          onChange={(event) => setImportProvider(event.target.value as ImportProvider)}
+                        >
+                          <option value="auto">Auto (Open Library then Google fallback)</option>
+                          <option value="openlibrary">Open Library only</option>
+                          <option value="google">Google Books only</option>
+                        </select>
+                      </label>
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => void importFromExternal()}
+                        disabled={importingExternal}
+                      >
+                        {importingExternal ? "Importing..." : "Import from APIs"}
+                      </button>
+                    </div>
+                    <div className="import-actions">
+                      <label>
+                        Enrich existing books (1-500)
+                        <input
+                          type="number"
+                          min={1}
+                          max={500}
+                          value={enrichLimit}
+                          onChange={(event) => setEnrichLimit(event.target.value)}
+                        />
+                      </label>
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        onClick={() => void enrichLibraryMetadata()}
+                        disabled={enrichingMetadata}
+                      >
+                        {enrichingMetadata ? "Enriching..." : "Enrich metadata"}
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                {showBookEditor && canManageBooks && (
+                  <section className="editor" aria-labelledby="editor-title">
+                    <h3 id="editor-title">{editingBookId ? "Edit book" : "Add new book"}</h3>
+                    <div className="editor-grid">
+                      <label>
+                        Title
+                        <input
+                          value={bookForm.title}
+                          onChange={(event) => setBookForm((prev) => ({ ...prev, title: event.target.value }))}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Author
+                        <input
+                          value={bookForm.author}
+                          onChange={(event) => setBookForm((prev) => ({ ...prev, author: event.target.value }))}
+                          required
+                        />
+                      </label>
+                      <label>
+                        ISBN
+                        <input
+                          value={bookForm.isbn}
+                          onChange={(event) => setBookForm((prev) => ({ ...prev, isbn: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        Genre
+                        <input
+                          value={bookForm.genre}
+                          onChange={(event) => setBookForm((prev) => ({ ...prev, genre: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        Published year
+                        <input
+                          type="number"
+                          min={0}
+                          max={2100}
+                          value={bookForm.publishedYear}
+                          onChange={(event) => setBookForm((prev) => ({ ...prev, publishedYear: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        Cover URL
+                        <input
+                          type="url"
+                          value={bookForm.coverUrl}
+                          onChange={(event) => setBookForm((prev) => ({ ...prev, coverUrl: event.target.value }))}
+                        />
+                      </label>
+                      <label className="full-width">
+                        Description
+                        <textarea
+                          rows={3}
+                          value={bookForm.description}
+                          onChange={(event) => setBookForm((prev) => ({ ...prev, description: event.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="row-actions">
+                      <button className="btn" type="button" disabled={submittingBook} onClick={() => void submitBook()}>
+                        {submittingBook ? "Saving..." : editingBookId ? "Save changes" : "Create book"}
+                      </button>
+                      <button className="btn btn-outline" type="button" onClick={resetBookForm}>
+                        Cancel
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                <section className="panel" aria-labelledby="books-title">
+                  <div className="panel-head">
+                    <h2 id="books-title">Books</h2>
+                  </div>
+
+                  {booksLoading && books.length === 0 && <p className="muted">Loading books...</p>}
+                  {!booksLoading && books.length === 0 && (
+                    <p className="muted">No books found for this filter. Try another search term.</p>
+                  )}
+
+                  <div className="book-grid storefront-grid">
+                    {books.map((book) => (
+                      <article className="book-card storefront-book-card" key={book.id}>
+                        <div className="book-card-head storefront-book-head">
+                          <BookCover book={book} className="book-cover-thumb" />
+                          <header>
+                            <h3>{book.title}</h3>
+                            <p className="muted">{book.author}</p>
+                            <BookRating book={book} />
+                          </header>
+                        </div>
+                        <p className={`status-pill ${book.available ? "available" : "unavailable"}`}>
+                          {book.available ? "Available" : "Checked out"}
+                        </p>
+                        <p className="book-genre">{truncateText(book.genre ?? "Uncategorized", 80)}</p>
+                        <p className="muted clamp-3">
+                          {truncateText(
+                            book.description ?? "No description yet. Click Preview to view more details.",
+                            110
+                          )}
+                        </p>
+                        <div className="row-actions book-card-actions">
+                          <button className="btn btn-outline" type="button" onClick={() => setPreviewBook(book)}>
+                            Preview
+                          </button>
+                          {book.available ? (
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={() => void checkoutBook(book.id)}
+                              disabled={!canBorrow}
+                            >
+                              {canBorrow ? "Borrow" : "Sign in to borrow"}
+                            </button>
+                          ) : (
+                            <span className="muted">Currently borrowed</span>
+                          )}
+                          {canManageBooks && (
+                            <>
+                              <button className="btn btn-outline" type="button" onClick={() => editBook(book)}>
+                                Edit
+                              </button>
+                              <button className="btn btn-danger" type="button" onClick={() => void deleteBook(book.id)}>
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+
+                  {hasNextPage && (
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      onClick={() => void loadBooks(nextCursor)}
+                      disabled={!nextCursor}
+                    >
+                      Load more
+                    </button>
+                  )}
+                </section>
+
+                <section className="panel shelf-panel" aria-labelledby="ai-title">
+                  <div className="panel-head">
+                    <h2 id="ai-title">{user ? "Recommended for you" : "Popular picks"}</h2>
+                  </div>
+                  {recommendationsLoading && <p className="muted">Updating recommendations...</p>}
+                  <div className="recommendation-shelf" role="list">
+                    {recommendations.length === 0 && <p className="muted">No recommendations yet.</p>}
+                    {recommendations.map((book) => (
+                      <article key={book.id} className="shelf-card" role="listitem">
+                        <BookCover book={book} className="book-cover-thumb shelf-cover" />
+                        <h3 className="shelf-title" title={book.title}>
+                          {truncateText(book.title, 100)}
+                        </h3>
+                        <p className="muted shelf-author" title={book.author}>
+                          {truncateText(book.author, 70)}
+                        </p>
+                        <BookRating book={book} />
+                        <p className="muted clamp-2 shelf-genre" title={book.genre ?? "General"}>
+                          {truncateText(book.genre ?? "General", 100)}
+                        </p>
+                        {book.available && (
+                          <button
+                            className="btn shelf-btn"
+                            type="button"
+                            onClick={() => void checkoutBook(book.id)}
+                            disabled={!canBorrow}
+                          >
+                            {canBorrow ? "Borrow" : "Sign in to borrow"}
+                          </button>
+                        )}
+                        {!book.available && <p className="muted shelf-status">Checked out</p>}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </section>
+            </section>
           </>
         )}
 
