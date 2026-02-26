@@ -23,8 +23,8 @@ Full-stack implementation of **Version 1: Mini Library Management System Challen
 
 ```text
 apps/
-  api/    Express API + Prisma schema
-  web/    React application
+  server/ Express API + Prisma schema
+  client/ React application
 .github/
   workflows/ci.yml
 render.yaml
@@ -41,26 +41,26 @@ npm install
 ### 2) Configure environment files
 
 ```bash
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env
+cp apps/server/.env.example apps/server/.env
+cp apps/client/.env.example apps/client/.env
 ```
 
 Fill at minimum:
 
-- `apps/api/.env`
+- `apps/server/.env`
   - `DATABASE_URL` (Neon connection string with `sslmode=require`)
   - `GOOGLE_CLIENT_ID`
   - `JWT_ACCESS_SECRET`
   - `JWT_REFRESH_SECRET`
   - `CORS_ORIGIN=http://localhost:5173`
-- `apps/web/.env`
+- `apps/client/.env`
   - `VITE_API_BASE_URL=http://localhost:4000/api/v1`
   - `VITE_GOOGLE_CLIENT_ID` (same Google client id)
 
 ### 3) Create database schema
 
 ```bash
-npm run db:push -w apps/api
+npm run db:push -w apps/server
 ```
 
 ### 4) Start development servers
@@ -124,7 +124,8 @@ GitHub Actions pipeline (`.github/workflows/ci.yml`) runs:
 
 Render deploy blueprint (`render.yaml`) provisions:
 
-1. `mlms-api` (Node web service)
-2. `mlms-web` (static site)
+1. `mlms-server` (Node web service)
+2. `mlms-client` (static site)
 
 Set production env vars in Render dashboard and point `DATABASE_URL` to Neon.
+

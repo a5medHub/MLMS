@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: mlms-api
+    name: mlms-server
     runtime: node
     rootDir: .
-    buildCommand: npm ci --include=dev && npm run build -w apps/api
-    startCommand: npm run db:push -w apps/api && npm run start -w apps/api
+    buildCommand: npm ci --include=dev && npm run build -w apps/server
+    startCommand: npm run db:push -w apps/server && npm run start -w apps/server
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
@@ -35,10 +35,10 @@ services:
         sync: false
 
   - type: static
-    name: mlms-web
+    name: mlms-client
     rootDir: .
-    buildCommand: npm ci --include=dev && npm run build -w apps/web
-    staticPublishPath: apps/web/dist
+    buildCommand: npm ci --include=dev && npm run build -w apps/client
+    staticPublishPath: apps/client/dist
     envVars:
       - key: VITE_API_BASE_URL
         sync: false

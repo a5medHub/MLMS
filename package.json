@@ -6,7 +6,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm:dev -w apps/api\" \"npm:dev -w apps/web\"",
+    "dev": "concurrently \"npm:dev -w apps/server\" \"npm:dev -w apps/client\"",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
