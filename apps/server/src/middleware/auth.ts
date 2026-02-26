@@ -20,6 +20,9 @@ const resolveUserFromToken = async (
   role: "ADMIN" | "MEMBER";
   email: string;
   name: string;
+  contactEmail: string | null;
+  phoneNumber: string | null;
+  personalId: string | null;
 }> => {
   const payload = verifyAccessToken(token);
   if (payload.typ !== "access") {
@@ -28,7 +31,15 @@ const resolveUserFromToken = async (
 
   const user = await prisma.user.findUnique({
     where: { id: payload.sub },
-    select: { id: true, role: true, email: true, name: true }
+    select: {
+      id: true,
+      role: true,
+      email: true,
+      name: true,
+      contactEmail: true,
+      phoneNumber: true,
+      personalId: true
+    }
   });
 
   if (!user) {

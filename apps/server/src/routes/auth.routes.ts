@@ -69,26 +69,54 @@ router.post(
       throw new HttpError(401, "Google account email must be verified");
     }
 
-    const user = await prisma.user.upsert({
-      where: { email: payload.email },
-      update: {
-        name: payload.name ?? payload.email,
-        picture: payload.picture,
-        googleSub: payload.sub
-      },
-      create: {
-        email: payload.email,
-        name: payload.name ?? payload.email,
-        picture: payload.picture,
-        googleSub: payload.sub
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ googleSub: payload.sub }, { email: payload.email }]
       },
       select: {
         id: true,
-        role: true,
-        email: true,
-        name: true
+        contactEmail: true
       }
     });
+
+    const user = existingUser
+      ? await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            email: payload.email,
+            name: payload.name ?? payload.email,
+            picture: payload.picture,
+            googleSub: payload.sub,
+            contactEmail: existingUser.contactEmail ?? payload.email
+          },
+          select: {
+            id: true,
+            role: true,
+            email: true,
+            name: true,
+            contactEmail: true,
+            phoneNumber: true,
+            personalId: true
+          }
+        })
+      : await prisma.user.create({
+          data: {
+            email: payload.email,
+            name: payload.name ?? payload.email,
+            picture: payload.picture,
+            googleSub: payload.sub,
+            contactEmail: payload.email
+          },
+          select: {
+            id: true,
+            role: true,
+            email: true,
+            name: true,
+            contactEmail: true,
+            phoneNumber: true,
+            personalId: true
+          }
+        });
 
     const authTokens = await createAuthPayload({
       id: user.id,

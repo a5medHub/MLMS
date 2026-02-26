@@ -17,6 +17,9 @@ model User {
   email         String         @unique
   name          String
   picture       String?
+  contactEmail  String?
+  phoneNumber   String?
+  personalId    String?        @unique
   role          Role           @default(MEMBER)
   googleSub     String?        @unique
   createdAt     DateTime       @default(now())

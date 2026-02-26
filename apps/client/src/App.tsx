@@ -46,7 +46,7 @@ type EnrichMetadataResponse = {
 };
 
 type BorrowerOverview = {
-  user: Pick<User, "id" | "name" | "email">;
+  user: Pick<User, "id" | "name" | "email" | "contactEmail" | "phoneNumber" | "personalId">;
   activeLoans: Loan[];
   overdueCount: number;
 };
@@ -57,6 +57,10 @@ type AdminLoansOverviewResponse = {
     overdueLoans: Loan[];
     overdueUsers: number;
   };
+};
+
+type UpdateContactResponse = {
+  data: User;
 };
 
 type ImportProvider = "auto" | "openlibrary" | "google";
@@ -449,6 +453,7 @@ const App = () => {
   const [message, setMessage] = useState("Welcome.");
   const [signingIn, setSigningIn] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("catalog");
+  const [showDueSoonDetails, setShowDueSoonDetails] = useState(false);
 
   const [books, setBooks] = useState<Book[]>([]);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -468,6 +473,12 @@ const App = () => {
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
+  const [contactDraft, setContactDraft] = useState({
+    contactEmail: "",
+    phoneNumber: "",
+    personalId: ""
+  });
 
   const [query, setQuery] = useState("");
   const [availableFilter, setAvailableFilter] = useState("all");
@@ -694,10 +705,27 @@ const App = () => {
       setOverdueLoans([]);
       setOverdueUsersCount(0);
       setDueDateDrafts({});
+      setShowDueSoonDetails(false);
       return;
     }
     void Promise.all([loadLoans(), loadRecommendations(), loadUsers(), loadAdminOverview()]);
   }, [loadAdminOverview, loadLoans, loadRecommendations, loadUsers, user]);
+
+  useEffect(() => {
+    if (!user) {
+      setContactDraft({
+        contactEmail: "",
+        phoneNumber: "",
+        personalId: ""
+      });
+      return;
+    }
+    setContactDraft({
+      contactEmail: user.contactEmail ?? user.email,
+      phoneNumber: user.phoneNumber ?? "",
+      personalId: user.personalId ?? ""
+    });
+  }, [user]);
 
   const loginWithGoogleCredential = useCallback(async (credential: string) => {
     try {
@@ -726,6 +754,7 @@ const App = () => {
       setUser(null);
       setAccessToken(null);
       setViewMode("catalog");
+      setShowDueSoonDetails(false);
       setMessage("Signed out.");
       void loadRecommendations();
     }
@@ -743,21 +772,30 @@ const App = () => {
   const totalBooksCount = libraryStats?.totalBooks ?? books.length;
   const availableBooksCount = libraryStats?.availableBooks ?? books.filter((book) => book.available).length;
   const checkedOutBooksCount = libraryStats?.checkedOutBooks ?? Math.max(0, totalBooksCount - availableBooksCount);
-  const dueSoonCount = useMemo(() => {
+  const dueSoonLoans = useMemo(() => {
     if (!user) {
-      return 0;
+      return [];
     }
     const now = new Date();
     const threshold = new Date(now);
     threshold.setDate(now.getDate() + 3);
-    return myActiveLoans.filter((loan) => {
-      if (!loan.dueAt) {
-        return false;
-      }
-      const due = new Date(loan.dueAt);
-      return due >= now && due <= threshold;
-    }).length;
-  }, [myActiveLoans, user]);
+    const sourceLoans =
+      user.role === "ADMIN" ? activeLoans.filter((loan) => loan.user.role === "MEMBER") : myActiveLoans;
+    return sourceLoans
+      .filter((loan) => {
+        if (!loan.dueAt) {
+          return false;
+        }
+        const due = new Date(loan.dueAt);
+        return due >= now && due <= threshold;
+      })
+      .sort((a, b) => {
+        const left = a.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const right = b.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+        return left - right;
+      });
+  }, [activeLoans, myActiveLoans, user]);
+  const dueSoonCount = dueSoonLoans.length;
 
   const openUserDashboard = useCallback(() => {
     if (!user) {
@@ -766,6 +804,14 @@ const App = () => {
     setViewMode("dashboard");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [user]);
+
+  const scrollToRecommendations = useCallback(() => {
+    const target = document.getElementById("recommendations-section");
+    if (!target) {
+      return;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   const ensureSignedIn = useCallback(
     (action: string) => {
@@ -890,6 +936,37 @@ const App = () => {
       await loadUsers();
     } catch (error) {
       setMessage(parseApiError(error));
+    }
+  };
+
+  const saveMyContactProfile = async () => {
+    try {
+      if (!contactDraft.contactEmail.trim()) {
+        setMessage("Contact email is required.");
+        return;
+      }
+      if (!contactDraft.phoneNumber.trim()) {
+        setMessage("Phone number is required.");
+        return;
+      }
+      setSavingContact(true);
+      const result = await authRequest<UpdateContactResponse>("/users/me/contact", {
+        method: "PATCH",
+        body: {
+          contactEmail: contactDraft.contactEmail.trim(),
+          phoneNumber: contactDraft.phoneNumber.trim(),
+          personalId: toNullableText(contactDraft.personalId)
+        }
+      });
+      setUser((current) => (current ? result.data : current));
+      setMessage("Contact profile updated.");
+      if (user?.role === "ADMIN") {
+        await loadUsers();
+      }
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setSavingContact(false);
     }
   };
 
@@ -1026,27 +1103,64 @@ const App = () => {
 
         {viewMode === "catalog" && (
           <>
-            <section className="catalog-head-cards" aria-label="Catalog summary">
-              <article className="panel catalog-head-card">
-                <h3>Due soon</h3>
-                <p className="catalog-head-value">
-                  {user ? `${dueSoonCount} book${dueSoonCount === 1 ? "" : "s"}` : "Sign in to track"}
-                </p>
-                <p className="muted">Due in the next 3 days</p>
-              </article>
-              <article className="panel catalog-head-card">
-                <h3>My loans</h3>
-                <p className="catalog-head-value">
-                  {user ? `${myActiveLoans.length} active` : "Guest browsing"}
-                </p>
-                <p className="muted">{user ? "Borrowed books in your account" : "Sign in only when borrowing"}</p>
-              </article>
-              <article className="panel catalog-head-card">
-                <h3>Recommendations</h3>
-                <p className="catalog-head-value">{recommendations.length} picks</p>
-                <p className="muted">{user ? "Based on your recent activity" : "Popular picks from the catalog"}</p>
-              </article>
-            </section>
+            {user && (
+              <section className="catalog-head-cards" aria-label="Catalog summary">
+                <article className="panel catalog-head-card">
+                  <h3>Due soon</h3>
+                  <button
+                    className="catalog-head-value-btn"
+                    type="button"
+                    onClick={() => setShowDueSoonDetails((current) => !current)}
+                    aria-expanded={showDueSoonDetails}
+                    aria-controls="due-soon-list"
+                  >
+                    <span className="catalog-head-value">{`${dueSoonCount} book${dueSoonCount === 1 ? "" : "s"}`}</span>
+                  </button>
+                  <p className="muted">
+                    {user.role === "ADMIN" ? "All member loans due in the next 3 days" : "Your books due in the next 3 days"}
+                  </p>
+                </article>
+                <article className="panel catalog-head-card">
+                  <h3>My loans</h3>
+                  <p className="catalog-head-value">{`${myActiveLoans.length} active`}</p>
+                  <p className="muted">Borrowed books in your account</p>
+                </article>
+                <article className="panel catalog-head-card">
+                  <h3>Recommendations</h3>
+                  <button className="catalog-head-value-btn" type="button" onClick={scrollToRecommendations}>
+                    <span className="catalog-head-value">{recommendations.length} picks</span>
+                  </button>
+                  <p className="muted">Based on your recent activity</p>
+                </article>
+              </section>
+            )}
+
+            {user && showDueSoonDetails && (
+              <section className="panel due-soon-panel" id="due-soon-list" aria-label="Due soon list">
+                <div className="panel-head">
+                  <h2>{user.role === "ADMIN" ? "Members due soon" : "Your due soon books"}</h2>
+                </div>
+                <ul className="stack-list">
+                  {dueSoonLoans.length === 0 && <li className="muted">No books are due in the next 3 days.</li>}
+                  {dueSoonLoans.map((loan) => (
+                    <li key={loan.id} className="row-item">
+                      <div>
+                        <strong title={loan.book.title}>{truncateText(loan.book.title, 110)}</strong>
+                        <p className="muted">
+                          Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
+                        </p>
+                        {user.role === "ADMIN" && (
+                          <p className="muted">
+                            {loan.user.name} | {loan.user.phoneNumber ?? "No phone"} |{" "}
+                            {loan.user.contactEmail ?? loan.user.email}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <section className="catalog-workspace">
               <aside className="panel catalog-sidebar" aria-label="Quick filters">
@@ -1309,7 +1423,7 @@ const App = () => {
                   )}
                 </section>
 
-                <section className="panel shelf-panel" aria-labelledby="ai-title">
+                <section id="recommendations-section" className="panel shelf-panel" aria-labelledby="ai-title">
                   <div className="panel-head">
                     <h2 id="ai-title">{user ? "Recommended for you" : "Popular picks"}</h2>
                   </div>
@@ -1350,55 +1464,105 @@ const App = () => {
         )}
 
         {viewMode === "dashboard" && user && (
-          <section className="panel two-col">
-            <section id="loans-section" aria-labelledby="loans-title">
+          <>
+            <section className="panel" aria-labelledby="contact-profile-title">
               <div className="panel-head">
-                <h2 id="loans-title">Active loans</h2>
+                <h2 id="contact-profile-title">My contact profile</h2>
               </div>
-              {loansLoading && <p className="muted">Updating loans...</p>}
-              <ul className="stack-list">
-                {activeLoans.length === 0 && <li className="muted">No active loans.</li>}
-                {activeLoans.map((loan) => (
-                  <li key={loan.id} className="row-item">
-                    <div>
-                      <strong>{loan.book.title}</strong>
-                      <p className="muted">
-                        Borrowed by {loan.user.name} on {new Date(loan.checkedOutAt).toLocaleDateString()}
-                      </p>
-                      <p className={loan.dueAt && new Date(loan.dueAt) < new Date() ? "overdue-text" : "muted"}>
-                        Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
-                      </p>
-                    </div>
-                    <div className="row-actions">
-                      {user.role === "ADMIN" && (
-                        <>
-                          <input
-                            type="date"
-                            value={dueDateDrafts[loan.id] ?? toDateInputValue(loan.dueAt)}
-                            onChange={(event) =>
-                              setDueDateDrafts((current) => ({ ...current, [loan.id]: event.target.value }))
-                            }
-                            aria-label={`Due date for ${loan.book.title}`}
-                          />
-                          <button
-                            className="btn btn-outline"
-                            type="button"
-                            onClick={() => void updateLoanDueDate(loan)}
-                            disabled={dueDateUpdatingId === loan.id}
-                          >
-                            {dueDateUpdatingId === loan.id ? "Saving..." : "Save due date"}
-                          </button>
-                        </>
-                      )}
-                      <button className="btn btn-outline" type="button" onClick={() => void checkinBook(loan.bookId)}>
-                        Check in
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <p className="muted">Phone and contact email are used by admins for return reminders.</p>
+              <div className="editor-grid contact-grid">
+                <label>
+                  Contact email
+                  <input
+                    type="email"
+                    value={contactDraft.contactEmail}
+                    onChange={(event) =>
+                      setContactDraft((current) => ({ ...current, contactEmail: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Phone number
+                  <input
+                    value={contactDraft.phoneNumber}
+                    onChange={(event) =>
+                      setContactDraft((current) => ({ ...current, phoneNumber: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Personal ID (optional)
+                  <input
+                    value={contactDraft.personalId}
+                    onChange={(event) =>
+                      setContactDraft((current) => ({ ...current, personalId: event.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Account email (Google SSO)
+                  <input value={user.email} readOnly />
+                </label>
+              </div>
+              <div className="row-actions">
+                <button className="btn" type="button" onClick={() => void saveMyContactProfile()} disabled={savingContact}>
+                  {savingContact ? "Saving..." : "Save contact profile"}
+                </button>
+              </div>
             </section>
-          </section>
+
+            <section className="panel two-col">
+              <section id="loans-section" aria-labelledby="loans-title">
+                <div className="panel-head">
+                  <h2 id="loans-title">Active loans</h2>
+                </div>
+                {loansLoading && <p className="muted">Updating loans...</p>}
+                <ul className="stack-list">
+                  {activeLoans.length === 0 && <li className="muted">No active loans.</li>}
+                  {activeLoans.map((loan) => (
+                    <li key={loan.id} className="row-item">
+                      <div>
+                        <strong>{loan.book.title}</strong>
+                        <p className="muted">
+                          Borrowed by {loan.user.name} on {new Date(loan.checkedOutAt).toLocaleDateString()}
+                        </p>
+                        <p className={loan.dueAt && new Date(loan.dueAt) < new Date() ? "overdue-text" : "muted"}>
+                          Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
+                        </p>
+                      </div>
+                      <div className="row-actions">
+                        {user.role === "ADMIN" && (
+                          <>
+                            <input
+                              type="date"
+                              value={dueDateDrafts[loan.id] ?? toDateInputValue(loan.dueAt)}
+                              onChange={(event) =>
+                                setDueDateDrafts((current) => ({ ...current, [loan.id]: event.target.value }))
+                              }
+                              aria-label={`Due date for ${loan.book.title}`}
+                            />
+                            <button
+                              className="btn btn-outline"
+                              type="button"
+                              onClick={() => void updateLoanDueDate(loan)}
+                              disabled={dueDateUpdatingId === loan.id}
+                            >
+                              {dueDateUpdatingId === loan.id ? "Saving..." : "Save due date"}
+                            </button>
+                          </>
+                        )}
+                        <button className="btn btn-outline" type="button" onClick={() => void checkinBook(loan.bookId)}>
+                          Check in
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </section>
+          </>
         )}
 
         {viewMode === "dashboard" && user?.role === "ADMIN" && (
@@ -1472,7 +1636,10 @@ const App = () => {
                 <thead>
                   <tr>
                     <th>Name</th>
-                    <th>Email</th>
+                    <th>Account email</th>
+                    <th>Contact email</th>
+                    <th>Phone</th>
+                    <th>ID</th>
                     <th>Role</th>
                     <th>Update</th>
                   </tr>
@@ -1482,6 +1649,9 @@ const App = () => {
                     <tr key={member.id}>
                       <td>{member.name}</td>
                       <td>{member.email}</td>
+                      <td>{member.contactEmail ?? member.email}</td>
+                      <td>{member.phoneNumber ?? "Missing"}</td>
+                      <td>{member.personalId ?? "-"}</td>
                       <td>{member.role}</td>
                       <td>
                         <label className="sr-only" htmlFor={`role-${member.id}`}>

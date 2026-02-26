@@ -4,6 +4,9 @@ export type User = {
   id: string;
   name: string;
   email: string;
+  contactEmail: string | null;
+  phoneNumber: string | null;
+  personalId: string | null;
   role: Role;
   createdAt?: string;
 };
@@ -31,5 +34,5 @@ export type Loan = {
   dueAt: string | null;
   returnedAt: string | null;
   book: Book;
-  user: Pick<User, "id" | "name" | "email">;
+  user: Pick<User, "id" | "name" | "email" | "role" | "contactEmail" | "phoneNumber" | "personalId">;
 };

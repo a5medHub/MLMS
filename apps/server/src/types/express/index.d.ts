@@ -6,6 +6,9 @@ declare global {
         role: "ADMIN" | "MEMBER";
         email: string;
         name: string;
+        contactEmail: string | null;
+        phoneNumber: string | null;
+        personalId: string | null;
       };
     }
   }

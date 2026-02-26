@@ -8,6 +8,15 @@ import { estimateLoanDueDate } from "../lib/reading-time";
 import { requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
+const loanUserSelect = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  contactEmail: true,
+  phoneNumber: true,
+  personalId: true
+} as const;
 
 const checkoutSchema = z.object({
   bookId: z.string().min(1),
@@ -52,11 +61,7 @@ router.get(
       include: {
         book: true,
         user: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
+          select: loanUserSelect
         }
       },
       orderBy: [{ checkedOutAt: "desc" }]
@@ -77,11 +82,7 @@ router.get(
       include: {
         book: true,
         user: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
+          select: loanUserSelect
         }
       },
       orderBy: [{ dueAt: "asc" }, { checkedOutAt: "asc" }]
@@ -121,6 +122,44 @@ router.get(
         overdueUsers: [...byUser.values()].filter((record) => record.overdueCount > 0).length
       }
     });
+  })
+);
+
+router.get(
+  "/due-soon",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const query = z
+      .object({
+        days: z.coerce.number().int().min(1).max(30).default(3)
+      })
+      .parse(req.query);
+    if (!req.user) {
+      throw new HttpError(401, "Authentication required");
+    }
+
+    const now = new Date();
+    const dueBefore = new Date(now);
+    dueBefore.setDate(dueBefore.getDate() + query.days);
+
+    const where = {
+      returnedAt: null as null,
+      dueAt: { not: null, gte: now, lte: dueBefore },
+      ...(req.user.role === "MEMBER" ? { userId: req.user.id } : {})
+    };
+
+    const loans = await prisma.loan.findMany({
+      where,
+      include: {
+        book: true,
+        user: {
+          select: loanUserSelect
+        }
+      },
+      orderBy: [{ dueAt: "asc" }, { checkedOutAt: "asc" }]
+    });
+
+    res.status(200).json({ data: loans, meta: { days: query.days } });
   })
 );
 
@@ -257,7 +296,7 @@ router.patch(
 
     const loan = await prisma.loan.findUnique({
       where: { id: params.loanId },
-      include: { book: true, user: { select: { id: true, name: true, email: true } } }
+      include: { book: true, user: { select: loanUserSelect } }
     });
     if (!loan) {
       throw new HttpError(404, "Loan not found");
@@ -269,7 +308,7 @@ router.patch(
     const updated = await prisma.loan.update({
       where: { id: loan.id },
       data: { dueAt: payload.dueAt },
-      include: { book: true, user: { select: { id: true, name: true, email: true } } }
+      include: { book: true, user: { select: loanUserSelect } }
     });
 
     await createAuditLog({
