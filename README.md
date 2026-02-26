@@ -82,6 +82,7 @@ Base path: `/api/v1`
 - `GET /auth/me` - current authenticated user
 - `GET /books` - search/list books (cursor pagination)
 - `POST /books` - create book (`ADMIN`)
+- `POST /books/import/external` - import books from Open Library with Google fallback (`ADMIN`)
 - `PATCH /books/:bookId` - update book (`ADMIN`)
 - `DELETE /books/:bookId` - delete book (`ADMIN`)
 - `POST /loans/checkout` - borrow a book
@@ -89,6 +90,7 @@ Base path: `/api/v1`
 - `GET /loans` - list loans (members see own loans; admins can view all)
 - `GET /users` - list users (`ADMIN`)
 - `PATCH /users/:userId/role` - update role (`ADMIN`)
+- `GET /search/books` - search with optional fallback import (`withFallback=true`)
 - `POST /ai/recommendations` - personalized recommendations
 
 ## Accessibility and UX Notes

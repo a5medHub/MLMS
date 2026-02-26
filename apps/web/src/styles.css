@@ -203,6 +203,20 @@ label {
   margin-bottom: 1rem;
 }
 
+.import-box {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  padding: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.import-grid {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.65rem;
+}
+
 .editor-grid {
   display: grid;
   gap: 0.7rem;
@@ -322,6 +336,11 @@ td {
 
   .editor-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .import-grid {
+    grid-template-columns: 1.5fr 1fr auto;
+    align-items: end;
   }
 
   .two-col {

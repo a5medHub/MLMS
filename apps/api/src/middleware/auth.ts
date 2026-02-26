@@ -1,8 +1,9 @@
 import type { NextFunction, Request, Response } from "express";
-import type { Role } from "@prisma/client";
 import { prisma } from "../db/prisma";
 import { HttpError } from "../lib/errors";
 import { verifyAccessToken } from "../lib/jwt";
+
+type UserRole = "ADMIN" | "MEMBER";
 
 const readAccessToken = (req: Request): string | null => {
   const auth = req.headers.authorization;
@@ -43,7 +44,7 @@ export const requireAuth = async (req: Request, _res: Response, next: NextFuncti
   }
 };
 
-export const requireRole = (roles: Role[]) => {
+export const requireRole = (roles: UserRole[]) => {
   return (req: Request, _res: Response, next: NextFunction): void => {
     if (!req.user) {
       next(new HttpError(401, "Authentication required"));

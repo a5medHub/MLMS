@@ -4,6 +4,7 @@ import { prisma } from "../db/prisma";
 import { asyncHandler } from "../lib/async-handler";
 import { createAuditLog } from "../lib/audit";
 import { HttpError } from "../lib/errors";
+import { persistExternalBooks, searchExternalBooks } from "../lib/external-books";
 import { requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
@@ -86,6 +87,49 @@ router.get(
       pageInfo: {
         hasNextPage,
         nextCursor
+      }
+    });
+  })
+);
+
+router.post(
+  "/import/external",
+  requireAuth,
+  requireRole(["ADMIN"]),
+  asyncHandler(async (req, res) => {
+    const payload = z
+      .object({
+        query: z.string().min(1),
+        limit: z.coerce.number().int().min(1).max(300).default(100),
+        provider: z.enum(["auto", "openlibrary", "google"]).default("auto")
+      })
+      .parse(req.body);
+
+    const externalResult = await searchExternalBooks(payload.query, payload.limit, payload.provider);
+    const persisted = await persistExternalBooks(externalResult.books);
+
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "BOOK_IMPORT_EXTERNAL",
+      entity: "BOOK",
+      metadata: {
+        query: payload.query,
+        limit: payload.limit,
+        provider: payload.provider,
+        sourceUsed: externalResult.sourceUsed,
+        fallbackUsed: externalResult.fallbackUsed,
+        createdCount: persisted.createdCount,
+        reusedCount: persisted.reusedCount
+      }
+    });
+
+    res.status(200).json({
+      data: persisted.books,
+      meta: {
+        sourceUsed: externalResult.sourceUsed,
+        fallbackUsed: externalResult.fallbackUsed,
+        importedCount: persisted.createdCount,
+        existingCount: persisted.reusedCount
       }
     });
   })

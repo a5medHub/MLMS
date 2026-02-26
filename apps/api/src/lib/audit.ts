@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { prisma } from "../db/prisma";
 
 type AuditInput = {
@@ -6,7 +5,7 @@ type AuditInput = {
   action: string;
   entity: string;
   entityId?: string;
-  metadata?: Prisma.InputJsonValue;
+  metadata?: any;
 };
 
 export const createAuditLog = async (input: AuditInput): Promise<void> => {

@@ -15,6 +15,16 @@ type BooksResponse = {
   };
 };
 
+type SearchFallbackResponse = {
+  data: Book[];
+  meta?: {
+    source?: string | null;
+    fallbackUsed?: boolean;
+    importedCount?: number;
+    existingCount?: number;
+  };
+};
+
 const emptyBookForm = {
   title: "",
   author: "",
@@ -131,6 +141,9 @@ const App = () => {
 
   const [query, setQuery] = useState("");
   const [availableFilter, setAvailableFilter] = useState("all");
+  const [importQuery, setImportQuery] = useState("popular fiction");
+  const [importLimit, setImportLimit] = useState("50");
+  const [importingExternal, setImportingExternal] = useState(false);
   const [showBookEditor, setShowBookEditor] = useState(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookForm, setBookForm] = useState(emptyBookForm);
@@ -193,6 +206,20 @@ const App = () => {
         }
 
         const result = await authRequest<BooksResponse>(`/books?${params.toString()}`);
+        const isInitialSearch = !cursor;
+        if (isInitialSearch && query.trim() && result.data.length === 0) {
+          const fallback = await authRequest<SearchFallbackResponse>(
+            `/search/books?q=${encodeURIComponent(query.trim())}&limit=12&withFallback=true`
+          );
+          setBooks(fallback.data);
+          setHasNextPage(false);
+          setNextCursor(null);
+          if (fallback.data.length > 0 && fallback.meta?.source && fallback.meta.source !== "local") {
+            setMessage(`No local results. Imported from ${fallback.meta.source}.`);
+          }
+          return;
+        }
+
         setBooks((previous) => (cursor ? [...previous, ...result.data] : result.data));
         setHasNextPage(result.pageInfo.hasNextPage);
         setNextCursor(result.pageInfo.nextCursor);
@@ -411,6 +438,35 @@ const App = () => {
     }
   };
 
+  const importFromExternal = async () => {
+    try {
+      setImportingExternal(true);
+      const limitNumber = Number(importLimit);
+      if (!Number.isFinite(limitNumber) || limitNumber < 1 || limitNumber > 300) {
+        setMessage("Import limit must be between 1 and 300.");
+        return;
+      }
+
+      const response = await authRequest<SearchFallbackResponse>("/books/import/external", {
+        method: "POST",
+        body: {
+          query: importQuery,
+          limit: limitNumber,
+          provider: "auto"
+        }
+      });
+
+      const importedCount = response.meta?.importedCount ?? response.data.length;
+      const existingCount = response.meta?.existingCount ?? 0;
+      setMessage(`Import finished. Added ${importedCount} new books, reused ${existingCount} existing.`);
+      await loadBooks();
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setImportingExternal(false);
+    }
+  };
+
   if (booting) {
     return (
       <main className="auth-shell">
@@ -493,6 +549,32 @@ const App = () => {
               {booksLoading ? "Searching..." : "Apply filters"}
             </button>
           </form>
+
+          {canManageBooks && (
+            <section className="import-box" aria-labelledby="import-title">
+              <h3 id="import-title">Import books for testing</h3>
+              <p className="muted">Primary source: Open Library. Automatic fallback: Google Books when not found.</p>
+              <div className="import-grid">
+                <label>
+                  Query
+                  <input value={importQuery} onChange={(event) => setImportQuery(event.target.value)} />
+                </label>
+                <label>
+                  Limit (1-300)
+                  <input
+                    type="number"
+                    min={1}
+                    max={300}
+                    value={importLimit}
+                    onChange={(event) => setImportLimit(event.target.value)}
+                  />
+                </label>
+                <button className="btn" type="button" onClick={() => void importFromExternal()} disabled={importingExternal}>
+                  {importingExternal ? "Importing..." : "Import from APIs"}
+                </button>
+              </div>
+            </section>
+          )}
 
           {showBookEditor && canManageBooks && (
             <section className="editor" aria-labelledby="editor-title">

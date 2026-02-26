@@ -14,6 +14,7 @@ const envSchema = z.object({
   COOKIE_DOMAIN: z.string().optional(),
   COOKIE_SECURE: z.string().default("false"),
   COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
+  GOOGLE_BOOKS_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional()
 });
 
