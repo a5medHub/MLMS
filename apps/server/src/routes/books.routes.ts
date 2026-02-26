@@ -4,12 +4,18 @@ import { prisma } from "../db/prisma";
 import { asyncHandler } from "../lib/async-handler";
 import { createAuditLog } from "../lib/audit";
 import { HttpError } from "../lib/errors";
-import { enrichLibraryMetadata, persistExternalBooks, searchExternalBooks } from "../lib/external-books";
+import {
+  enrichLibraryMetadata,
+  enrichMissingCoreMetadata,
+  persistExternalBooks,
+  searchExternalBooks
+} from "../lib/external-books";
 import { FALLBACK_BOOKS } from "../lib/fallback-books";
 import { requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
 const BOOKS_CACHE_TTL_MS = 20_000;
+const AUTO_CORE_ENRICH_COOLDOWN_MS = 5 * 60 * 1000;
 
 type BooksPayload = {
   data: Array<{
@@ -23,6 +29,7 @@ type BooksPayload = {
     coverUrl: string | null;
     averageRating: number | null;
     ratingsCount: number | null;
+    aiMetadata: boolean;
     available: boolean;
     createdAt: Date | string;
     updatedAt?: Date | string;
@@ -35,9 +42,39 @@ type BooksPayload = {
 
 const booksCache = new Map<string, { expiresAt: number; payload: BooksPayload }>();
 let lastBooksPayload: BooksPayload | null = null;
+let autoCoreEnrichmentInProgress = false;
+let autoCoreEnrichmentLastRunAt = 0;
 const invalidateBooksCache = (): void => {
   booksCache.clear();
   lastBooksPayload = null;
+};
+
+const maybeTriggerAutoCoreMetadataEnrichment = (): void => {
+  const now = Date.now();
+  if (autoCoreEnrichmentInProgress) {
+    return;
+  }
+  if (now - autoCoreEnrichmentLastRunAt < AUTO_CORE_ENRICH_COOLDOWN_MS) {
+    return;
+  }
+
+  autoCoreEnrichmentInProgress = true;
+  autoCoreEnrichmentLastRunAt = now;
+  void enrichMissingCoreMetadata({
+    limit: 300,
+    provider: "auto"
+  })
+    .then((result) => {
+      if (result.updatedCount > 0) {
+        invalidateBooksCache();
+      }
+    })
+    .catch(() => {
+      // no-op: background enrichment should not impact API response path
+    })
+    .finally(() => {
+      autoCoreEnrichmentInProgress = false;
+    });
 };
 
 const hasValidAuthHeader = (authHeader?: string): boolean => {
@@ -62,13 +99,16 @@ const getBooksCacheKey = (query: {
   });
 };
 
-const normalizeBookRecord = <TBook extends { averageRating?: number | null; ratingsCount?: number | null }>(
+const normalizeBookRecord = <
+  TBook extends { averageRating?: number | null; ratingsCount?: number | null; aiMetadata?: boolean | null }
+>(
   book: TBook
-): TBook & { averageRating: number | null; ratingsCount: number | null } => {
+): TBook & { averageRating: number | null; ratingsCount: number | null; aiMetadata: boolean } => {
   return {
     ...book,
     averageRating: book.averageRating ?? null,
-    ratingsCount: book.ratingsCount ?? null
+    ratingsCount: book.ratingsCount ?? null,
+    aiMetadata: book.aiMetadata ?? false
   };
 };
 
@@ -186,7 +226,8 @@ router.get(
         normalizeBookRecord({
           ...book,
           averageRating: null,
-          ratingsCount: null
+          ratingsCount: null,
+          aiMetadata: false
         })
       );
     };
@@ -233,6 +274,7 @@ router.get(
       });
     }
 
+    maybeTriggerAutoCoreMetadataEnrichment();
     res.status(200).json(payload);
   })
 );
@@ -316,6 +358,44 @@ router.post(
 );
 
 router.post(
+  "/enrich-core-metadata",
+  requireAuth,
+  requireRole(["ADMIN"]),
+  asyncHandler(async (req, res) => {
+    const payload = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(500).default(300),
+        provider: z.enum(["auto", "openlibrary", "google"]).default("auto")
+      })
+      .parse(req.body ?? {});
+
+    const result = await enrichMissingCoreMetadata({
+      limit: payload.limit,
+      provider: payload.provider
+    });
+    invalidateBooksCache();
+
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "BOOK_CORE_METADATA_ENRICH",
+      entity: "BOOK",
+      metadata: {
+        limit: payload.limit,
+        provider: payload.provider,
+        ...result
+      }
+    });
+
+    res.status(200).json({
+      meta: {
+        providerUsed: payload.provider,
+        ...result
+      }
+    });
+  })
+);
+
+router.post(
   "/enrich-metadata",
   requireAuth,
   requireRole(["ADMIN"]),
@@ -390,7 +470,8 @@ router.get(
         ? ({
             ...legacyBook,
             averageRating: null,
-            ratingsCount: null
+            ratingsCount: null,
+            aiMetadata: false
           } as typeof book)
         : null;
     }

@@ -22,6 +22,7 @@ export type Book = {
   coverUrl: string | null;
   averageRating: number | null;
   ratingsCount: number | null;
+  aiMetadata: boolean;
   available: boolean;
   createdAt: string;
 };

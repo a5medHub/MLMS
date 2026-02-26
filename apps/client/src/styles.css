@@ -442,6 +442,17 @@ label {
   background: #fff;
   display: grid;
   gap: 0.45rem;
+  box-shadow: 0 8px 18px rgba(23, 31, 44, 0.12);
+  transition: transform 200ms ease-in-out, box-shadow 200ms ease-in-out;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.book-card:hover,
+.book-card:focus-within {
+  transform: scale(1.1);
+  box-shadow: 0 16px 36px rgba(20, 30, 45, 0.2);
+  z-index: 2;
 }
 
 .book-card-head {
@@ -646,6 +657,17 @@ label {
   flex-direction: column;
   gap: 0.3rem;
   min-height: 360px;
+  box-shadow: 0 8px 18px rgba(23, 31, 44, 0.12);
+  transition: transform 200ms ease-in-out, box-shadow 200ms ease-in-out;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.shelf-card:hover,
+.shelf-card:focus-within {
+  transform: scale(1.1);
+  box-shadow: 0 16px 36px rgba(20, 30, 45, 0.2);
+  z-index: 2;
 }
 
 .shelf-cover {
@@ -659,6 +681,35 @@ label {
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 4.2rem;
+}
+
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.title-row > h3,
+.title-row > .shelf-title {
+  flex: 1;
+}
+
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  background: #d8e9ff;
+  color: #0b56b4;
+  border: 1px solid #8fc0ff;
+  flex-shrink: 0;
 }
 
 .shelf-author {
@@ -844,7 +895,7 @@ td {
   }
 
   .import-actions {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
     align-items: end;
   }
 

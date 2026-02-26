@@ -40,6 +40,7 @@ model Book {
   coverUrl      String?
   averageRating Float?
   ratingsCount  Int?
+  aiMetadata    Boolean   @default(false)
   available     Boolean   @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

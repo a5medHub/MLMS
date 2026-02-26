@@ -21,6 +21,7 @@ type RecommendationsPayload = {
     coverUrl: string | null;
     averageRating: number | null;
     ratingsCount: number | null;
+    aiMetadata: boolean;
     available: boolean;
     createdAt: Date | string;
     updatedAt?: Date | string;
@@ -160,7 +161,8 @@ router.post(
       return legacy.map((book) => ({
         ...book,
         averageRating: null,
-        ratingsCount: null
+        ratingsCount: null,
+        aiMetadata: false
       }));
     };
 

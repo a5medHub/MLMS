@@ -9,6 +9,7 @@ type FallbackBook = {
   coverUrl: string | null;
   averageRating: number | null;
   ratingsCount: number | null;
+  aiMetadata: boolean;
   available: boolean;
   createdAt: string;
   updatedAt: string;
@@ -28,6 +29,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     coverUrl: null,
     averageRating: 4.6,
     ratingsCount: 1200,
+    aiMetadata: false,
     available: true,
     createdAt: nowIso,
     updatedAt: nowIso
@@ -43,6 +45,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     coverUrl: null,
     averageRating: 4.5,
     ratingsCount: 980,
+    aiMetadata: false,
     available: true,
     createdAt: nowIso,
     updatedAt: nowIso
@@ -58,6 +61,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     coverUrl: null,
     averageRating: 4.1,
     ratingsCount: 760,
+    aiMetadata: false,
     available: true,
     createdAt: nowIso,
     updatedAt: nowIso
@@ -73,6 +77,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     coverUrl: null,
     averageRating: 4.4,
     ratingsCount: 640,
+    aiMetadata: false,
     available: true,
     createdAt: nowIso,
     updatedAt: nowIso
@@ -88,6 +93,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     coverUrl: null,
     averageRating: 4.7,
     ratingsCount: 1400,
+    aiMetadata: false,
     available: true,
     createdAt: nowIso,
     updatedAt: nowIso
@@ -103,6 +109,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     coverUrl: null,
     averageRating: 4.3,
     ratingsCount: 910,
+    aiMetadata: false,
     available: true,
     createdAt: nowIso,
     updatedAt: nowIso
