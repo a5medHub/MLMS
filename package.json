@@ -8,12 +8,17 @@
   "scripts": {
     "dev": "concurrently \"npm:dev -w apps/server\" \"npm:dev -w apps/client\"",
     "build": "npm run build --workspaces --if-present",
+    "build:render": "npm run build -w apps/client && npm run build -w apps/server",
+    "start:render": "npm run db:push -w apps/server && npm run start -w apps/server",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.59.0"
   },
   "engines": {
     "node": "20.x"

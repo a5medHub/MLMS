@@ -3,8 +3,8 @@ services:
     name: mlms-server
     runtime: node
     rootDir: .
-    buildCommand: npm ci --include=dev && npm run build -w apps/server
-    startCommand: npm run db:push -w apps/server && npm run start -w apps/server
+    buildCommand: npm ci --include=dev && npm run build:render
+    startCommand: npm run start:render
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
@@ -33,14 +33,7 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
-
-  - type: static
-    name: mlms-client
-    rootDir: .
-    buildCommand: npm ci --include=dev && npm run build -w apps/client
-    staticPublishPath: apps/client/dist
-    envVars:
       - key: VITE_API_BASE_URL
-        sync: false
+        value: /api/v1
       - key: VITE_GOOGLE_CLIENT_ID
         sync: false

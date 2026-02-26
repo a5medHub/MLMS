@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
@@ -34,6 +36,26 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/api/v1", apiRouter);
+
+const clientDistPath = path.resolve(__dirname, "../../client/dist");
+const clientIndexPath = path.join(clientDistPath, "index.html");
+const hasClientBuild = fs.existsSync(clientIndexPath);
+
+if (hasClientBuild) {
+  app.use(express.static(clientDistPath, { index: false }));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path === "/health") {
+      next();
+      return;
+    }
+
+    res.sendFile(clientIndexPath, (error) => {
+      if (error) {
+        next(error);
+      }
+    });
+  });
+}
 
 app.use(notFoundHandler);
 app.use(errorHandler);

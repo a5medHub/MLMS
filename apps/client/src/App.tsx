@@ -263,13 +263,39 @@ const LoginScreen = ({
   }, [googleClientId, onGoogleCredential]);
 
   return (
-    <main className="auth-shell" aria-labelledby="auth-heading">
-      <section className="auth-card">
+    <main className="auth-shell storefront-shell" aria-labelledby="auth-heading">
+      <section className="storefront-hero" aria-hidden="true">
+        <p className="eyebrow storefront-badge">Editorial Picks</p>
+        <h2>Build a modern circulation desk for your readers.</h2>
+        <p className="muted">
+          Track borrowers, monitor due dates, and enrich your catalog with AI-powered metadata in one workflow.
+        </p>
+        <div className="storefront-covers">
+          <article className="mock-book"><span>Classics</span></article>
+          <article className="mock-book"><span>Mystery</span></article>
+          <article className="mock-book"><span>History</span></article>
+          <article className="mock-book"><span>Sci-Fi</span></article>
+          <article className="mock-book"><span>Memoir</span></article>
+          <article className="mock-book"><span>Poetry</span></article>
+        </div>
+        <div className="storefront-stats">
+          <p><strong>300+</strong> seeded books</p>
+          <p><strong>Auto</strong> due-date estimate</p>
+          <p><strong>Admin</strong> overdue alerts</p>
+        </div>
+      </section>
+
+      <section className="auth-card storefront-card">
         <p className="eyebrow">Mini Library Management System</p>
         <h1 id="auth-heading">Sign in to manage your library</h1>
         <p className="muted">
-          Mobile-first, role-based, and accessible by default. Use Google SSO to continue.
+          Continue with Google SSO to access borrowing tools, borrower insights, and catalog management.
         </p>
+        <ul className="storefront-list">
+          <li>Borrower tracking by user</li>
+          <li>Due dates with manual admin override</li>
+          <li>Overdue alerts and metadata enrichment</li>
+        </ul>
         <div id="google-signin" aria-label="Google Sign In button" />
         {!googleClientId && (
           <p className="notice" role="alert">

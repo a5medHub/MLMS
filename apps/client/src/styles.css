@@ -63,6 +63,96 @@ body {
   animation: rise 350ms ease;
 }
 
+.storefront-shell {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  align-content: center;
+  gap: 1rem;
+}
+
+.storefront-hero {
+  border: 1px solid #d9cda7;
+  border-radius: 1rem;
+  padding: 1.1rem;
+  background:
+    linear-gradient(160deg, #fff5df 0%, #f6e8c6 46%, #f2dfb5 100%);
+  box-shadow: var(--shadow);
+  animation: rise 350ms ease;
+}
+
+.storefront-badge {
+  color: #8a5f16;
+}
+
+.storefront-covers {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.mock-book {
+  border-radius: 0.6rem;
+  border: 1px solid rgba(39, 29, 12, 0.15);
+  min-height: 78px;
+  display: grid;
+  place-items: end start;
+  padding: 0.45rem;
+  font-weight: 800;
+  font-family: "Space Grotesk", sans-serif;
+  color: #fdf7eb;
+  box-shadow: 0 8px 18px rgba(46, 35, 13, 0.16);
+}
+
+.mock-book:nth-child(1) {
+  background: linear-gradient(140deg, #8f6a2f 0%, #5f4319 100%);
+}
+.mock-book:nth-child(2) {
+  background: linear-gradient(140deg, #2d4f87 0%, #1a3157 100%);
+}
+.mock-book:nth-child(3) {
+  background: linear-gradient(140deg, #2e6e43 0%, #184529 100%);
+}
+.mock-book:nth-child(4) {
+  background: linear-gradient(140deg, #8a3f29 0%, #612714 100%);
+}
+.mock-book:nth-child(5) {
+  background: linear-gradient(140deg, #6f357f 0%, #4a2056 100%);
+}
+.mock-book:nth-child(6) {
+  background: linear-gradient(140deg, #5a5959 0%, #2e2d2d 100%);
+}
+
+.storefront-stats {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.storefront-stats p {
+  margin: 0;
+  border: 1px solid rgba(58, 43, 14, 0.2);
+  border-radius: 999px;
+  padding: 0.26rem 0.62rem;
+  background: rgba(255, 255, 255, 0.65);
+  color: #4a3814;
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.storefront-card {
+  width: 100%;
+}
+
+.storefront-list {
+  margin: 0.75rem 0;
+  padding-left: 1.1rem;
+  color: #3f5043;
+  display: grid;
+  gap: 0.25rem;
+}
+
 .topbar {
   display: flex;
   flex-direction: column;
@@ -448,6 +538,10 @@ td {
     padding-inline: 1.25rem;
   }
 
+  .storefront-shell {
+    max-width: 1080px;
+  }
+
   .filters {
     grid-template-columns: 2fr 1fr auto;
     align-items: end;
@@ -482,6 +576,16 @@ td {
 }
 
 @media (min-width: 1100px) {
+  .storefront-shell {
+    grid-template-columns: 1.15fr 0.95fr;
+    align-items: stretch;
+    gap: 1.2rem;
+  }
+
+  .storefront-hero {
+    padding: 1.3rem;
+  }
+
   .page {
     max-width: 1200px;
     margin: 0 auto;
