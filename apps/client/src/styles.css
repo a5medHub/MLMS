@@ -440,9 +440,10 @@ label {
   border-radius: 0.8rem;
   padding: 0.8rem;
   background: #fff;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.45rem;
-  box-shadow: 0 8px 18px rgba(23, 31, 44, 0.12);
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.18);
   transition: transform 200ms ease-in-out, box-shadow 200ms ease-in-out;
   transform-origin: center;
   will-change: transform;
@@ -460,6 +461,10 @@ label {
   grid-template-columns: 84px 1fr;
   gap: 0.7rem;
   align-items: start;
+}
+
+.book-card-head header {
+  min-width: 0;
 }
 
 .book-cover-thumb,
@@ -609,7 +614,9 @@ label {
 }
 
 .book-card-actions .btn {
-  min-width: 120px;
+  min-width: 0;
+  width: 100%;
+  white-space: nowrap;
 }
 
 .rating-line {
@@ -657,7 +664,7 @@ label {
   flex-direction: column;
   gap: 0.3rem;
   min-height: 360px;
-  box-shadow: 0 8px 18px rgba(23, 31, 44, 0.12);
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.18);
   transition: transform 200ms ease-in-out, box-shadow 200ms ease-in-out;
   transform-origin: center;
   will-change: transform;
@@ -688,11 +695,14 @@ label {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.35rem;
+  min-width: 0;
 }
 
 .title-row > h3,
 .title-row > .shelf-title {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ai-badge {
@@ -710,6 +720,18 @@ label {
   color: #0b56b4;
   border: 1px solid #8fc0ff;
   flex-shrink: 0;
+}
+
+.book-card-actions {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.book-card-actions .muted {
+  grid-column: 1 / -1;
 }
 
 .shelf-author {
