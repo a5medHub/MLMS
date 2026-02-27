@@ -27,6 +27,8 @@ model User {
   phoneNumber   String?
   personalId    String?        @unique
   readingPoints Int            @default(0)
+  avatarPreset  String?
+  backgroundPreset String?
   role          Role           @default(MEMBER)
   googleSub     String?        @unique
   createdAt     DateTime       @default(now())

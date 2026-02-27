@@ -24,6 +24,8 @@ const resolveUserFromToken = async (
   phoneNumber: string | null;
   personalId: string | null;
   readingPoints: number;
+  avatarPreset: string | null;
+  backgroundPreset: string | null;
 }> => {
   const payload = verifyAccessToken(token);
   if (payload.typ !== "access") {
@@ -40,7 +42,9 @@ const resolveUserFromToken = async (
       contactEmail: true,
       phoneNumber: true,
       personalId: true,
-      readingPoints: true
+      readingPoints: true,
+      avatarPreset: true,
+      backgroundPreset: true
     }
   });
 

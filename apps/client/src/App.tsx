@@ -144,6 +144,115 @@ type BookDetailsResponse = {
 
 type ImportProvider = "auto" | "openlibrary" | "google";
 type ViewMode = "catalog" | "dashboard";
+type AvatarPreset = {
+  id: string;
+  label: string;
+  emoji: string;
+  innerBackground: string;
+};
+type BackgroundPreset = {
+  id: string;
+  label: string;
+  background: string;
+};
+
+const avatarPresets: AvatarPreset[] = [
+  { id: "avatar-1", label: "Forest Owl", emoji: "🦉", innerBackground: "linear-gradient(140deg,#365d3f,#23412a)" },
+  { id: "avatar-2", label: "Blue Wave", emoji: "🌊", innerBackground: "linear-gradient(140deg,#3b6ea8,#274978)" },
+  { id: "avatar-3", label: "Sunrise", emoji: "🌅", innerBackground: "linear-gradient(140deg,#d2862f,#8d4f18)" },
+  { id: "avatar-4", label: "Rocket", emoji: "🚀", innerBackground: "linear-gradient(140deg,#5a4ea2,#382f74)" },
+  { id: "avatar-5", label: "Leaf", emoji: "🍃", innerBackground: "linear-gradient(140deg,#4e8645,#2f5c2a)" },
+  { id: "avatar-6", label: "Comet", emoji: "☄️", innerBackground: "linear-gradient(140deg,#7a3d52,#4e2635)" },
+  { id: "avatar-7", label: "Book", emoji: "📘", innerBackground: "linear-gradient(140deg,#466f87,#264350)" },
+  { id: "avatar-8", label: "Crown", emoji: "👑", innerBackground: "linear-gradient(140deg,#8b6d2d,#5d491c)" },
+  { id: "avatar-9", label: "Fox", emoji: "🦊", innerBackground: "linear-gradient(140deg,#9a4c30,#6a311c)" },
+  { id: "avatar-10", label: "Moon", emoji: "🌙", innerBackground: "linear-gradient(140deg,#4e5668,#333a49)" }
+];
+const backgroundPresets: BackgroundPreset[] = [
+  {
+    id: "bg-1",
+    label: "Sand Glow",
+    background:
+      "radial-gradient(circle at 20% 10%, #e9e4d8 0%, transparent 45%),radial-gradient(circle at 80% 0%, #f6ead2 0%, transparent 35%),#f6f3ea"
+  },
+  {
+    id: "bg-2",
+    label: "Northern Blue",
+    background:
+      "radial-gradient(circle at 15% 18%, #d9e9f8 0%, transparent 46%),radial-gradient(circle at 85% 4%, #cde7f7 0%, transparent 33%),#eef6fb"
+  },
+  {
+    id: "bg-3",
+    label: "Moss",
+    background:
+      "radial-gradient(circle at 18% 14%, #dcead7 0%, transparent 45%),radial-gradient(circle at 82% 4%, #e5f0dd 0%, transparent 33%),#f2f7ef"
+  },
+  {
+    id: "bg-4",
+    label: "Rose",
+    background:
+      "radial-gradient(circle at 18% 16%, #f3dfe0 0%, transparent 44%),radial-gradient(circle at 86% 5%, #f8e6dd 0%, transparent 31%),#f9f0ee"
+  },
+  {
+    id: "bg-5",
+    label: "Violet Mist",
+    background:
+      "radial-gradient(circle at 20% 14%, #e3ddf3 0%, transparent 45%),radial-gradient(circle at 83% 4%, #ece5fa 0%, transparent 32%),#f4f1fb"
+  },
+  {
+    id: "bg-6",
+    label: "Steel",
+    background:
+      "radial-gradient(circle at 18% 14%, #d9dfe6 0%, transparent 45%),radial-gradient(circle at 84% 4%, #e3e9ef 0%, transparent 32%),#f2f5f8"
+  },
+  {
+    id: "bg-7",
+    label: "Sunset",
+    background:
+      "radial-gradient(circle at 17% 13%, #f7dccb 0%, transparent 45%),radial-gradient(circle at 84% 5%, #f8e6cc 0%, transparent 33%),#fbf2e7"
+  },
+  {
+    id: "bg-8",
+    label: "Aqua",
+    background:
+      "radial-gradient(circle at 20% 12%, #d9f0ed 0%, transparent 45%),radial-gradient(circle at 83% 5%, #dff7f2 0%, transparent 32%),#edf9f5"
+  },
+  {
+    id: "bg-9",
+    label: "Night Sky",
+    background:
+      "radial-gradient(circle at 20% 12%, #1f2b44 0%, transparent 42%),radial-gradient(circle at 84% 6%, #2b3451 0%, transparent 32%),#111827"
+  },
+  {
+    id: "bg-10",
+    label: "Coffee",
+    background:
+      "radial-gradient(circle at 20% 12%, #e7ddd4 0%, transparent 45%),radial-gradient(circle at 82% 6%, #efe4d8 0%, transparent 32%),#f5eee8"
+  }
+];
+const defaultAvatarPresetId = avatarPresets[0].id;
+const defaultBackgroundPresetId = backgroundPresets[0].id;
+
+const getAvatarPreset = (id: string | null | undefined): AvatarPreset => {
+  return avatarPresets.find((preset) => preset.id === id) ?? avatarPresets[0];
+};
+
+const getBackgroundPreset = (id: string | null | undefined): BackgroundPreset => {
+  return backgroundPresets.find((preset) => preset.id === id) ?? backgroundPresets[0];
+};
+
+const getLevelRingColor = (levelNumber: number): string => {
+  if (levelNumber >= 4) {
+    return "#f2b94f";
+  }
+  if (levelNumber === 3) {
+    return "#8d6df0";
+  }
+  if (levelNumber === 2) {
+    return "#29b38d";
+  }
+  return "#4f8cd4";
+};
 
 const emptyBookForm = {
   title: "",
@@ -522,6 +631,8 @@ const ProfileMenu = ({
     .map((part) => part[0]?.toUpperCase())
     .join("") ?? "U";
   const userLevel = user ? getLevelInfo(user.readingPoints) : null;
+  const avatarPreset = getAvatarPreset(user?.avatarPreset);
+  const ringColor = userLevel ? getLevelRingColor(userLevel.levelNumber) : "#4f8cd4";
   const notificationCount = user?.role === "ADMIN" ? adminPendingCount : memberUnreadRequestCount;
 
   return (
@@ -536,17 +647,21 @@ const ProfileMenu = ({
         style={
           userLevel
             ? {
-                background: `conic-gradient(#4f8cd4 ${userLevel.progressPercent}%, #d9e1eb ${userLevel.progressPercent}% 100%)`
+                background: `conic-gradient(${ringColor} ${userLevel.progressPercent}%, #d9e1eb ${userLevel.progressPercent}% 100%)`,
+                boxShadow: `0 0 0 1px rgba(25, 35, 52, 0.2), 0 0 12px ${ringColor}66`
               }
             : undefined
         }
       >
-        <span className="profile-avatar">{initials}</span>
+        <span className="profile-avatar" style={{ background: avatarPreset.innerBackground }}>
+          {user ? avatarPreset.emoji : initials}
+        </span>
         {notificationCount > 0 && <span className="profile-notification-badge">{notificationCount}</span>}
       </button>
       {userLevel && (
         <div className="profile-level-mini" aria-label={`Level ${userLevel.levelNumber}, ${userLevel.progressPercent}% progress`}>
           <p className="profile-level-label">{userLevel.levelName}</p>
+          <p className="profile-xp-chip">{`${userLevel.totalPoints} XP`}</p>
         </div>
       )}
 
@@ -565,7 +680,7 @@ const ProfileMenu = ({
               <p className="muted">
                 {user.email} | {user.role}
               </p>
-              <p className="muted">{`Level ${userLevel?.levelNumber ?? 1} - ${userLevel?.levelName ?? "Noob"} | ${user.readingPoints} pts`}</p>
+              <p className="muted">{`Level ${userLevel?.levelNumber ?? 1} - ${userLevel?.levelName ?? "Noob"} | ${user.readingPoints} XP`}</p>
               <p className="profile-section-title">Borrowed books: {borrowedCount}</p>
               {user.role === "ADMIN" && <p className="profile-section-title">Pending requests: {adminPendingCount}</p>}
               {user.role === "MEMBER" && <p className="profile-section-title">Request updates: {memberUnreadRequestCount}</p>}
@@ -634,10 +749,15 @@ const App = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
+  const [savingAppearance, setSavingAppearance] = useState(false);
   const [contactDraft, setContactDraft] = useState({
     contactEmail: "",
     phoneNumber: "",
     personalId: ""
+  });
+  const [appearanceDraft, setAppearanceDraft] = useState({
+    avatarPreset: defaultAvatarPresetId,
+    backgroundPreset: defaultBackgroundPresetId
   });
 
   const [query, setQuery] = useState("");
@@ -995,6 +1115,10 @@ const App = () => {
         phoneNumber: "",
         personalId: ""
       });
+      setAppearanceDraft({
+        avatarPreset: defaultAvatarPresetId,
+        backgroundPreset: defaultBackgroundPresetId
+      });
       return;
     }
     setContactDraft({
@@ -1002,7 +1126,17 @@ const App = () => {
       phoneNumber: user.phoneNumber ?? "",
       personalId: user.personalId ?? ""
     });
+    setAppearanceDraft({
+      avatarPreset: user.avatarPreset ?? defaultAvatarPresetId,
+      backgroundPreset: user.backgroundPreset ?? defaultBackgroundPresetId
+    });
   }, [user]);
+
+  useEffect(() => {
+    const preset = getBackgroundPreset(user?.backgroundPreset ?? defaultBackgroundPresetId);
+    document.body.style.background = preset.background;
+    document.body.style.color = user?.backgroundPreset === "bg-9" ? "#f1f5f9" : "";
+  }, [user?.backgroundPreset]);
 
   const loginWithGoogleCredential = useCallback(async (credential: string) => {
     try {
@@ -1442,7 +1576,7 @@ const App = () => {
       }
       const pointsLabel =
         response.meta?.awardedPoints && response.meta.awardedPoints > 0
-          ? ` +${response.meta.awardedPoints} points`
+          ? ` +${response.meta.awardedPoints} XP`
           : "";
       setMessage(`Book checked in (returned).${pointsLabel}`);
       // Background sync (does not block UI response).
@@ -1567,6 +1701,25 @@ const App = () => {
     } finally {
       setImportingExternal(false);
       setEnrichingCoreMetadata(false);
+    }
+  };
+
+  const saveAppearancePreferences = async () => {
+    try {
+      setSavingAppearance(true);
+      const result = await authRequest<UpdateContactResponse>("/users/me/preferences", {
+        method: "PATCH",
+        body: {
+          avatarPreset: appearanceDraft.avatarPreset,
+          backgroundPreset: appearanceDraft.backgroundPreset
+        }
+      });
+      setUser((current) => (current ? result.data : current));
+      setMessage("Appearance updated.");
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setSavingAppearance(false);
     }
   };
 
@@ -2325,6 +2478,59 @@ const App = () => {
               <div className="row-actions">
                 <button className="btn" type="button" onClick={() => void saveMyContactProfile()} disabled={savingContact}>
                   {savingContact ? "Saving..." : "Save contact profile"}
+                </button>
+              </div>
+            </section>
+
+            <section className="panel" aria-labelledby="appearance-title">
+              <div className="panel-head">
+                <h2 id="appearance-title">Appearance</h2>
+              </div>
+              <p className="muted">Choose your avatar and app background theme.</p>
+              <div className="appearance-grid">
+                <div>
+                  <p className="profile-section-title">Avatar presets</p>
+                  <div className="avatar-preset-grid">
+                    {avatarPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        className={`avatar-preset-btn ${appearanceDraft.avatarPreset === preset.id ? "active" : ""}`}
+                        type="button"
+                        onClick={() => setAppearanceDraft((current) => ({ ...current, avatarPreset: preset.id }))}
+                        aria-label={`Use ${preset.label} avatar`}
+                      >
+                        <span className="avatar-preset-circle" style={{ background: preset.innerBackground }}>
+                          {preset.emoji}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="profile-section-title">Background presets</p>
+                  <div className="bg-preset-grid">
+                    {backgroundPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        className={`bg-preset-btn ${appearanceDraft.backgroundPreset === preset.id ? "active" : ""}`}
+                        type="button"
+                        onClick={() => {
+                          setAppearanceDraft((current) => ({ ...current, backgroundPreset: preset.id }));
+                          document.body.style.background = preset.background;
+                          document.body.style.color = preset.id === "bg-9" ? "#f1f5f9" : "";
+                        }}
+                        aria-label={`Use ${preset.label} background`}
+                        title={preset.label}
+                      >
+                        <span className="bg-preset-preview" style={{ background: preset.background }} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="row-actions">
+                <button className="btn" type="button" onClick={() => void saveAppearancePreferences()} disabled={savingAppearance}>
+                  {savingAppearance ? "Saving..." : "Save appearance"}
                 </button>
               </div>
             </section>

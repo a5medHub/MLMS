@@ -648,19 +648,24 @@ label {
 }
 
 .profile-trigger {
-  width: 2.6rem;
-  height: 2.6rem;
+  width: 3rem;
+  height: 3rem;
   border-radius: 999px;
   border: none;
-  background: #3a2d21;
+  background: conic-gradient(#4f8cd4 0%, #d9e1eb 100%);
   color: #f6f3ea;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  padding: 3px;
   font-weight: 800;
   cursor: pointer;
   position: relative;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.profile-trigger:hover {
+  transform: translateY(-1px);
 }
 
 .profile-avatar {
@@ -671,7 +676,7 @@ label {
   border: 1px solid #47382a;
   display: grid;
   place-items: center;
-  font-size: 0.78rem;
+  font-size: 1.05rem;
   letter-spacing: 0.03em;
 }
 
@@ -699,10 +704,22 @@ label {
 
 .profile-level-label {
   margin: 0;
-  font-size: 0.74rem;
+  font-size: 0.76rem;
   color: #33495f;
   font-weight: 700;
   text-align: center;
+}
+
+.profile-xp-chip {
+  margin: 0.18rem auto 0;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid #bfd1e6;
+  padding: 0.08rem 0.42rem;
+  background: #e9f4ff;
+  color: #1e4f84;
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
 .profile-dropdown {
@@ -750,6 +767,69 @@ label {
   min-height: 2.25rem;
   padding: 0.42rem 0.65rem;
   font-size: 0.9rem;
+}
+
+.appearance-grid {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.avatar-preset-grid {
+  margin-top: 0.45rem;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.avatar-preset-btn {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: #fff;
+  padding: 0.3rem;
+}
+
+.avatar-preset-btn.active {
+  border-color: #3a7cc0;
+  box-shadow: 0 0 0 2px rgba(79, 140, 212, 0.2);
+}
+
+.avatar-preset-circle {
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 40, 56, 0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.bg-preset-grid {
+  margin-top: 0.45rem;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.bg-preset-btn {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: #fff;
+  padding: 0.2rem;
+}
+
+.bg-preset-btn.active {
+  border-color: #3a7cc0;
+  box-shadow: 0 0 0 2px rgba(79, 140, 212, 0.2);
+}
+
+.bg-preset-preview {
+  display: block;
+  width: 100%;
+  height: 2rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(31, 40, 56, 0.18);
 }
 
 .storefront-book-card {
@@ -1095,6 +1175,10 @@ td {
   }
 
   .editor-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appearance-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

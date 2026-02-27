@@ -8,6 +8,8 @@ export type User = {
   phoneNumber: string | null;
   personalId: string | null;
   readingPoints: number;
+  avatarPreset: string | null;
+  backgroundPreset: string | null;
   role: Role;
   createdAt?: string;
 };

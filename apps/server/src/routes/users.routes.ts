@@ -19,6 +19,23 @@ const contactSchema = z.object({
     .nullable()
     .transform((value) => value?.trim() || null)
 });
+const avatarPresetIds = [
+  "avatar-1",
+  "avatar-2",
+  "avatar-3",
+  "avatar-4",
+  "avatar-5",
+  "avatar-6",
+  "avatar-7",
+  "avatar-8",
+  "avatar-9",
+  "avatar-10"
+] as const;
+const backgroundPresetIds = ["bg-1", "bg-2", "bg-3", "bg-4", "bg-5", "bg-6", "bg-7", "bg-8", "bg-9", "bg-10"] as const;
+const preferencesSchema = z.object({
+  avatarPreset: z.enum(avatarPresetIds),
+  backgroundPreset: z.enum(backgroundPresetIds)
+});
 
 router.get(
   "/",
@@ -34,6 +51,8 @@ router.get(
         phoneNumber: true,
         personalId: true,
         readingPoints: true,
+        avatarPreset: true,
+        backgroundPreset: true,
         role: true,
         createdAt: true
       },
@@ -82,6 +101,8 @@ router.patch(
           phoneNumber: true,
           personalId: true,
           readingPoints: true,
+          avatarPreset: true,
+          backgroundPreset: true,
           role: true,
           createdAt: true
         }
@@ -107,6 +128,51 @@ router.patch(
         contactEmail: payload.contactEmail,
         phoneNumber: payload.phoneNumber,
         personalId: payload.personalId
+      }
+    });
+
+    res.status(200).json({ data: updated });
+  })
+);
+
+router.patch(
+  "/me/preferences",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!req.user) {
+      throw new HttpError(401, "Authentication required");
+    }
+    const payload = preferencesSchema.parse(req.body);
+
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        avatarPreset: payload.avatarPreset,
+        backgroundPreset: payload.backgroundPreset
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        contactEmail: true,
+        phoneNumber: true,
+        personalId: true,
+        readingPoints: true,
+        avatarPreset: true,
+        backgroundPreset: true,
+        role: true,
+        createdAt: true
+      }
+    });
+
+    await createAuditLog({
+      actorUserId: req.user.id,
+      action: "USER_PREFERENCES_UPDATED",
+      entity: "USER",
+      entityId: req.user.id,
+      metadata: {
+        avatarPreset: payload.avatarPreset,
+        backgroundPreset: payload.backgroundPreset
       }
     });
 
@@ -144,6 +210,8 @@ router.patch(
         phoneNumber: true,
         personalId: true,
         readingPoints: true,
+        avatarPreset: true,
+        backgroundPreset: true,
         role: true,
         createdAt: true
       }

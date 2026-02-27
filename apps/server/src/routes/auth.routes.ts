@@ -97,17 +97,21 @@ router.post(
             contactEmail: true,
             phoneNumber: true,
             personalId: true,
-            readingPoints: true
+            readingPoints: true,
+            avatarPreset: true,
+            backgroundPreset: true
           }
         })
       : await prisma.user.create({
-          data: {
-            email: payload.email,
-            name: payload.name ?? payload.email,
-            picture: payload.picture,
-            googleSub: payload.sub,
-            contactEmail: payload.email
-          },
+        data: {
+          email: payload.email,
+          name: payload.name ?? payload.email,
+          picture: payload.picture,
+          googleSub: payload.sub,
+          contactEmail: payload.email,
+          avatarPreset: "avatar-1",
+          backgroundPreset: "bg-1"
+        },
           select: {
             id: true,
             role: true,
@@ -116,7 +120,9 @@ router.post(
             contactEmail: true,
             phoneNumber: true,
             personalId: true,
-            readingPoints: true
+            readingPoints: true,
+            avatarPreset: true,
+            backgroundPreset: true
           }
         });
 
