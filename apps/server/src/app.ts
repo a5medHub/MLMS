@@ -37,6 +37,8 @@ app.use(
           "https://*.books.googleusercontent.com",
           "https://covers.openlibrary.org",
           "http://covers.openlibrary.org",
+          "https://archive.org",
+          "https://*.archive.org",
           "https://*.gstatic.com",
           "https://gstatic.com",
           "https://*.googleusercontent.com",
