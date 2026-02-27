@@ -278,6 +278,21 @@ body {
   margin: 0;
 }
 
+.compact-label {
+  display: none;
+}
+
+.context-back-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: -50px;
+}
+
+.back-arrow-btn {
+  gap: 0.35rem;
+  padding-inline: 0.72rem;
+}
+
 .catalog-admin-toggle {
   width: 100%;
 }
@@ -1153,19 +1168,50 @@ label {
   margin-top: auto;
 }
 
-.dashboard-nav {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.8rem;
-}
+@media (max-width: 1024px) {
+  .desktop-label {
+    display: none;
+  }
 
-.dashboard-back-btn {
-  white-space: nowrap;
+  .compact-label {
+    display: inline;
+  }
+
+  .catalog-total-books {
+    display: none;
+  }
+
+  .catalog-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 0.55rem;
+    margin-block: 0.15rem 0.6rem;
+  }
+
+  .catalog-filters .filter-search-label {
+    grid-column: 1 / 2;
+  }
+
+  .catalog-filters .filter-availability-label {
+    grid-column: 2 / 3;
+  }
+
+  .catalog-filters .btn {
+    grid-column: 1 / -1;
+  }
+
+  .catalog-filters label {
+    font-size: 0.84rem;
+    gap: 0.2rem;
+  }
+
+  .catalog-filters input,
+  .catalog-filters select {
+    padding: 0.5rem 0.58rem;
+  }
 }
 
 @media (max-width: 640px) {
-
   .catalog-head-card.panel {
     padding: 0.72rem 0.8rem;
     border-radius: 0.85rem;
@@ -1183,19 +1229,6 @@ label {
   .catalog-head-card .muted {
     font-size: 0.95rem;
     margin-top: 0.15rem;
-  }
-
-  .dashboard-nav {
-    padding: 0.72rem 0.8rem;
-  }
-
-  .dashboard-nav .muted {
-    margin-top: 0;
-    font-size: 0.95rem;
-  }
-
-  .dashboard-back-btn {
-    padding-inline: 0.75rem;
   }
 
   .profile-settings-btn {
@@ -1332,11 +1365,6 @@ td {
     align-items: end;
   }
 
-  .catalog-filters {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
   .book-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1378,6 +1406,13 @@ td {
 
   .book-interaction-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1025px) {
+  .catalog-filters {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 }
 

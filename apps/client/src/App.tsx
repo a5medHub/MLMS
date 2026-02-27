@@ -1368,6 +1368,7 @@ const App = () => {
       if (!pathBookId) {
         setBookDetails(null);
         setShareFeedback("");
+        setViewMode("catalog");
       }
     };
 
@@ -1473,6 +1474,9 @@ const App = () => {
       return;
     }
     closeBookDetails();
+    if (viewMode !== "dashboard") {
+      window.history.pushState({ mlmsView: "dashboard" }, "", window.location.pathname);
+    }
     setViewMode("dashboard");
     window.scrollTo({ top: 0, behavior: "smooth" });
     if (user.role === "MEMBER") {
@@ -1482,16 +1486,25 @@ const App = () => {
           // no-op: notification ack failure should not block dashboard
         });
     }
-  }, [authRequest, closeBookDetails, loadBorrowRequests, user]);
+  }, [authRequest, closeBookDetails, loadBorrowRequests, user, viewMode]);
 
   const openUserSettings = useCallback(() => {
     if (!user) {
       return;
     }
     closeBookDetails();
+    if (viewMode !== "settings") {
+      window.history.pushState({ mlmsView: "settings" }, "", window.location.pathname);
+    }
     setViewMode("settings");
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [closeBookDetails, user]);
+  }, [closeBookDetails, user, viewMode]);
+
+  const goHome = useCallback(() => {
+    closeBookDetails();
+    setViewMode("catalog");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [closeBookDetails]);
 
   const scrollToRecommendations = useCallback(() => {
     setShouldLoadRecommendations(true);
@@ -1958,16 +1971,21 @@ const App = () => {
       </header>
 
       <main id="main-content" className="page">
+        {(activeBookId || viewMode !== "catalog") && (
+          <div className="context-back-row">
+            <button className="btn btn-outline back-arrow-btn" type="button" onClick={goHome} aria-label="Back to home">
+              <span aria-hidden="true">←</span>
+              <span>Home</span>
+            </button>
+          </div>
+        )}
         {activeBookId ? (
           <section className="panel book-detail-page" aria-labelledby="book-detail-title">
             <div className="panel-head book-detail-head">
               <button
                 className="btn btn-outline"
                 type="button"
-                onClick={() => {
-                  closeBookDetails();
-                  setViewMode("catalog");
-                }}
+                onClick={goHome}
               >
                 Back to Home
               </button>
@@ -2219,19 +2237,6 @@ const App = () => {
           </section>
         ) : (
           <>
-        {(viewMode === "dashboard" || viewMode === "settings") && user && (
-          <section className="panel dashboard-nav" aria-label="Dashboard navigation">
-            <p className="muted">
-              {viewMode === "dashboard"
-                ? "Dashboard view includes your loans and management tools."
-                : "Settings view includes your profile and appearance preferences."}
-            </p>
-            <button className="btn btn-outline dashboard-back-btn" type="button" onClick={() => setViewMode("catalog")}>
-              Back to Home
-            </button>
-          </section>
-        )}
-
         {viewMode === "catalog" && (
           <>
             {user && (
@@ -2253,7 +2258,10 @@ const App = () => {
                   <p className="catalog-head-value">{`${myActiveLoans.length} active`}</p>
                 </article>
                 <article className="panel catalog-head-card">
-                  <h3>Recommendations</h3>
+                  <h3>
+                    <span className="desktop-label">Recommendations</span>
+                    <span className="compact-label">Picks</span>
+                  </h3>
                   <button className="catalog-head-value-btn" type="button" onClick={scrollToRecommendations}>
                     <span className="catalog-head-value">{recommendations.length} picks</span>
                   </button>
@@ -2305,12 +2313,13 @@ const App = () => {
                     void loadBooks();
                   }}
                 >
-                  <label>
-                    Search by title, author, genre, ISBN
+                  <label className="filter-search-label">
+                    <span className="desktop-label">Search by title, author, genre, ISBN</span>
+                    <span className="compact-label">Search</span>
                     <input value={query} onChange={(event) => setQuery(event.target.value)} name="q" />
                   </label>
 
-                  <label>
+                  <label className="filter-availability-label">
                     Availability
                     <select value={availableFilter} onChange={(event) => setAvailableFilter(event.target.value)}>
                       <option value="all">All</option>
@@ -2553,7 +2562,12 @@ const App = () => {
                   {!shouldLoadRecommendations && <p className="muted">Recommendations will load when you reach this section.</p>}
                   {shouldLoadRecommendations && recommendationsLoading && <p className="muted">Updating recommendations...</p>}
                   <div className="recommendation-shelf" role="list">
-                    {shouldLoadRecommendations && recommendations.length === 0 && <p className="muted">No recommendations yet.</p>}
+                  {shouldLoadRecommendations && recommendations.length === 0 && (
+                    <p className="muted">
+                      <span className="desktop-label">No recommendations yet.</span>
+                      <span className="compact-label">No picks yet.</span>
+                    </p>
+                  )}
                     {recommendations.map((book) => (
                       <article
                         key={book.id}
