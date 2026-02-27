@@ -1,5 +1,5 @@
 const CACHE_NAME = "mlms-shell-v1";
-const SHELL_ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/favicon-book.svg", "/icons/icon-192.svg", "/icons/icon-512.svg"];
+const SHELL_ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/favicon-book.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
