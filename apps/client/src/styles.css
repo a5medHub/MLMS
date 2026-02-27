@@ -633,6 +633,11 @@ label {
   color: #8d302c;
 }
 
+.status-pill.pending {
+  background: #e9edf5;
+  color: #3f5670;
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -650,11 +655,59 @@ label {
   place-items: center;
   font-weight: 800;
   cursor: pointer;
+  position: relative;
 }
 
 .profile-avatar {
   font-size: 0.78rem;
   letter-spacing: 0.03em;
+}
+
+.profile-notification-badge {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  border: 1px solid #fff;
+  background: #c8382f;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-level-mini {
+  margin-top: 0.35rem;
+  width: 130px;
+}
+
+.profile-level-label {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #33495f;
+  font-weight: 700;
+  text-align: right;
+}
+
+.profile-level-track {
+  margin-top: 0.2rem;
+  width: 100%;
+  height: 0.36rem;
+  border-radius: 999px;
+  background: #d9e1eb;
+  overflow: hidden;
+}
+
+.profile-level-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4f8cd4 0%, #2f6dad 100%);
 }
 
 .profile-dropdown {

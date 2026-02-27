@@ -31,6 +31,7 @@ type BooksPayload = {
     ratingsCount: number | null;
     aiMetadata: boolean;
     available: boolean;
+    requestPending: boolean;
     createdAt: Date | string;
     updatedAt?: Date | string;
   }>;
@@ -100,15 +101,26 @@ const getBooksCacheKey = (query: {
 };
 
 const normalizeBookRecord = <
-  TBook extends { averageRating?: number | null; ratingsCount?: number | null; aiMetadata?: boolean | null }
+  TBook extends {
+    averageRating?: number | null;
+    ratingsCount?: number | null;
+    aiMetadata?: boolean | null;
+    requestPending?: boolean | null;
+  }
 >(
   book: TBook
-): TBook & { averageRating: number | null; ratingsCount: number | null; aiMetadata: boolean } => {
+): TBook & {
+  averageRating: number | null;
+  ratingsCount: number | null;
+  aiMetadata: boolean;
+  requestPending: boolean;
+} => {
   return {
     ...book,
     averageRating: book.averageRating ?? null,
     ratingsCount: book.ratingsCount ?? null,
-    aiMetadata: book.aiMetadata ?? false
+    aiMetadata: book.aiMetadata ?? false,
+    requestPending: book.requestPending ?? false
   };
 };
 
@@ -202,7 +214,8 @@ const findBookById = async (bookId: string) => {
       ...legacyBook,
       averageRating: null,
       ratingsCount: null,
-      aiMetadata: false
+      aiMetadata: false,
+      requestPending: false
     });
   }
 };
@@ -257,7 +270,8 @@ const findRelatedBooks = async (
           ...record,
           averageRating: null,
           ratingsCount: null,
-          aiMetadata: false
+          aiMetadata: false,
+          requestPending: false
         })
       );
     }
@@ -357,7 +371,7 @@ router.get(
     const runPrimaryQuery = async () => {
       const books = await prisma.book.findMany({
         where,
-        orderBy: [{ available: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        orderBy: [{ available: "desc" }, { requestPending: "asc" }, { createdAt: "desc" }, { id: "desc" }],
         take: query.limit + 1,
         ...(query.cursor ? { skip: 1, cursor: { id: query.cursor } } : {})
       });
@@ -389,7 +403,8 @@ router.get(
           ...book,
           averageRating: null,
           ratingsCount: null,
-          aiMetadata: false
+          aiMetadata: false,
+          requestPending: false
         })
       );
     };
@@ -447,7 +462,7 @@ router.get(
     try {
       const [totalBooks, availableBooks, activeLoans] = await Promise.all([
         prisma.book.count(),
-        prisma.book.count({ where: { available: true } }),
+        prisma.book.count({ where: { available: true, requestPending: false } }),
         prisma.loan.count({ where: { returnedAt: null } })
       ]);
 
@@ -626,7 +641,7 @@ router.get(
       content: string;
       createdAt: Date;
       updatedAt: Date;
-      user: { id: string; name: string };
+      user: { id: string; name: string; readingPoints: number };
     }> = [];
     let myReview: { id: string; rating: number; content: string; updatedAt: Date } | null = null;
     let myNote: { id: string; content: string; updatedAt: Date } | null = null;
@@ -638,7 +653,8 @@ router.get(
           user: {
             select: {
               id: true,
-              name: true
+              name: true,
+              readingPoints: true
             }
           }
         },

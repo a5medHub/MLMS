@@ -15,7 +15,8 @@ const loanUserSelect = {
   role: true,
   contactEmail: true,
   phoneNumber: true,
-  personalId: true
+  personalId: true,
+  readingPoints: true
 } as const;
 const fallbackLoanDays = 30;
 const dueEstimateWaitMs = 1200;
@@ -40,6 +41,11 @@ const buildFallbackDueEstimate = (): DueDateEstimate => ({
   source: "fallback",
   pageCount: null
 });
+
+const calculateReadingPoints = (pageCount: number | null): number => {
+  const pages = pageCount && pageCount > 0 ? pageCount : 100;
+  return Math.max(1, Math.round(pages / 10));
+};
 
 router.get(
   "/",
@@ -209,10 +215,12 @@ router.post(
       const claimResult = await tx.book.updateMany({
         where: {
           id: payload.bookId,
-          available: true
+          available: true,
+          requestPending: false
         },
         data: {
-          available: false
+          available: false,
+          requestPending: false
         }
       });
       if (claimResult.count !== 1) {
@@ -265,7 +273,17 @@ router.post(
     }
 
     const activeLoan = await prisma.loan.findFirst({
-      where: { bookId: payload.bookId, returnedAt: null }
+      where: { bookId: payload.bookId, returnedAt: null },
+      include: {
+        book: {
+          select: {
+            id: true,
+            title: true,
+            author: true,
+            isbn: true
+          }
+        }
+      }
     });
     if (!activeLoan) {
       throw new HttpError(404, "No active loan found for this book");
@@ -274,16 +292,33 @@ router.post(
       throw new HttpError(403, "You can only check in your own loans");
     }
 
+    const readingEstimate = await estimateLoanDueDate({
+      title: activeLoan.book.title,
+      author: activeLoan.book.author,
+      isbn: activeLoan.book.isbn
+    }).catch(() => buildFallbackDueEstimate());
+    const awardedPoints = calculateReadingPoints(readingEstimate.pageCount);
+
     const updatedLoan = await prisma.$transaction(async (tx) => {
       await tx.book.update({
         where: { id: payload.bookId },
-        data: { available: true }
+        data: {
+          available: true,
+          requestPending: false
+        }
+      });
+
+      await tx.user.update({
+        where: { id: activeLoan.userId },
+        data: {
+          readingPoints: { increment: awardedPoints }
+        }
       });
 
       return tx.loan.update({
         where: { id: activeLoan.id },
         data: { returnedAt: new Date() },
-        include: { book: true }
+        include: { book: true, user: { select: loanUserSelect } }
       });
     });
 
@@ -292,10 +327,22 @@ router.post(
       action: "BOOK_CHECKED_IN",
       entity: "LOAN",
       entityId: updatedLoan.id,
-      metadata: { bookId: payload.bookId }
+      metadata: {
+        bookId: payload.bookId,
+        pageCount: readingEstimate.pageCount,
+        pageSource: readingEstimate.source,
+        awardedPoints
+      }
     });
 
-    res.status(200).json({ data: updatedLoan });
+    res.status(200).json({
+      data: updatedLoan,
+      meta: {
+        awardedPoints,
+        pageCount: readingEstimate.pageCount,
+        pageSource: readingEstimate.source
+      }
+    });
   })
 );
 

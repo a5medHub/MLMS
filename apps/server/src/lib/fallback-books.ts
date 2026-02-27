@@ -11,6 +11,7 @@ type FallbackBook = {
   ratingsCount: number | null;
   aiMetadata: boolean;
   available: boolean;
+  requestPending: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -31,6 +32,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     ratingsCount: 1200,
     aiMetadata: false,
     available: true,
+    requestPending: false,
     createdAt: nowIso,
     updatedAt: nowIso
   },
@@ -47,6 +49,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     ratingsCount: 980,
     aiMetadata: false,
     available: true,
+    requestPending: false,
     createdAt: nowIso,
     updatedAt: nowIso
   },
@@ -63,6 +66,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     ratingsCount: 760,
     aiMetadata: false,
     available: true,
+    requestPending: false,
     createdAt: nowIso,
     updatedAt: nowIso
   },
@@ -79,6 +83,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     ratingsCount: 640,
     aiMetadata: false,
     available: true,
+    requestPending: false,
     createdAt: nowIso,
     updatedAt: nowIso
   },
@@ -95,6 +100,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     ratingsCount: 1400,
     aiMetadata: false,
     available: true,
+    requestPending: false,
     createdAt: nowIso,
     updatedAt: nowIso
   },
@@ -111,6 +117,7 @@ export const FALLBACK_BOOKS: FallbackBook[] = [
     ratingsCount: 910,
     aiMetadata: false,
     available: true,
+    requestPending: false,
     createdAt: nowIso,
     updatedAt: nowIso
   }

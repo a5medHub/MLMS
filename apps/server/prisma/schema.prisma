@@ -12,6 +12,12 @@ enum Role {
   MEMBER
 }
 
+enum BorrowRequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
 model User {
   id            String         @id @default(cuid())
   email         String         @unique
@@ -20,6 +26,7 @@ model User {
   contactEmail  String?
   phoneNumber   String?
   personalId    String?        @unique
+  readingPoints Int            @default(0)
   role          Role           @default(MEMBER)
   googleSub     String?        @unique
   createdAt     DateTime       @default(now())
@@ -27,6 +34,8 @@ model User {
   loans         Loan[]
   reviews       BookReview[]
   notes         BookNote[]
+  borrowRequests BorrowRequest[] @relation("BorrowRequestUser")
+  reviewedRequests BorrowRequest[] @relation("BorrowRequestReviewer")
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]     @relation("ActorAuditLogs")
 }
@@ -44,17 +53,38 @@ model Book {
   ratingsCount  Int?
   aiMetadata    Boolean   @default(false)
   available     Boolean   @default(true)
+  requestPending Boolean  @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   loans         Loan[]
   reviews       BookReview[]
   notes         BookNote[]
+  borrowRequests BorrowRequest[]
 
   @@index([title])
   @@index([author])
   @@index([genre])
   @@index([available])
+  @@index([requestPending])
   @@index([averageRating])
+}
+
+model BorrowRequest {
+  id           String              @id @default(cuid())
+  userId       String
+  bookId       String
+  status       BorrowRequestStatus @default(PENDING)
+  reviewedById String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  reviewedAt   DateTime?
+  memberSeenAt DateTime?
+  user         User                @relation("BorrowRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  book         Book                @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  reviewedBy   User?               @relation("BorrowRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([bookId, status])
+  @@index([userId, status, memberSeenAt])
 }
 
 model BookReview {

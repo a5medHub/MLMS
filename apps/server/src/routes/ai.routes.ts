@@ -23,6 +23,7 @@ type RecommendationsPayload = {
     ratingsCount: number | null;
     aiMetadata: boolean;
     available: boolean;
+    requestPending: boolean;
     createdAt: Date | string;
     updatedAt?: Date | string;
     recommendationScore: number;
@@ -131,6 +132,7 @@ router.post(
       return prisma.book.findMany({
         where: {
           available: true,
+          requestPending: false,
           ...(borrowedBookIds.size > 0 ? { id: { notIn: [...borrowedBookIds] } } : {})
         },
         take: 200
@@ -162,7 +164,8 @@ router.post(
         ...book,
         averageRating: null,
         ratingsCount: null,
-        aiMetadata: false
+        aiMetadata: false,
+        requestPending: false
       }));
     };
 

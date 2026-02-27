@@ -57,7 +57,7 @@ type EnrichCoreMetadataResponse = {
 };
 
 type BorrowerOverview = {
-  user: Pick<User, "id" | "name" | "email" | "contactEmail" | "phoneNumber" | "personalId">;
+  user: Pick<User, "id" | "name" | "email" | "contactEmail" | "phoneNumber" | "personalId" | "readingPoints">;
   activeLoans: Loan[];
   overdueCount: number;
 };
@@ -72,6 +72,32 @@ type AdminLoansOverviewResponse = {
 
 type UpdateContactResponse = {
   data: User;
+};
+
+type BorrowRequestStatus = "PENDING" | "APPROVED" | "DECLINED";
+
+type BorrowRequestItem = {
+  id: string;
+  status: BorrowRequestStatus;
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt: string | null;
+  memberSeenAt: string | null;
+  user: Pick<User, "id" | "name" | "email" | "role" | "contactEmail" | "phoneNumber" | "personalId" | "readingPoints">;
+  book: Book;
+  reviewedBy: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+};
+
+type BorrowRequestsResponse = {
+  data: BorrowRequestItem[];
+  meta: {
+    pendingCount: number;
+    unreadForMember: number;
+  };
 };
 
 type UiLogEntry = {
@@ -89,6 +115,7 @@ type BookReviewEntry = {
   user: {
     id: string;
     name: string;
+    readingPoints: number;
   };
 };
 
@@ -148,6 +175,36 @@ const toDateInputValue = (isoDate: string | null): string => {
     return "";
   }
   return new Date(isoDate).toISOString().slice(0, 10);
+};
+
+const getLevelInfo = (points: number) => {
+  const safePoints = Math.max(0, Math.floor(points));
+  const baseCap = 100;
+  const growth = 1.5;
+  const levelNames = ["Noob", "Reader", "Pro", "King"];
+
+  let levelNumber = 1;
+  let levelFloor = 0;
+  let levelCap = baseCap;
+  while (safePoints >= levelCap) {
+    levelNumber += 1;
+    levelFloor = levelCap;
+    levelCap += Math.round(baseCap * Math.pow(growth, levelNumber - 2));
+  }
+
+  const pointsIntoLevel = safePoints - levelFloor;
+  const pointsNeededInLevel = Math.max(1, levelCap - levelFloor);
+  const progressPercent = Math.max(0, Math.min(100, Math.round((pointsIntoLevel / pointsNeededInLevel) * 100)));
+  const levelName = levelNumber <= levelNames.length ? levelNames[levelNumber - 1] : `Legend ${levelNumber}`;
+
+  return {
+    levelNumber,
+    levelName,
+    totalPoints: safePoints,
+    pointsIntoLevel,
+    pointsNeededInLevel,
+    progressPercent
+  };
 };
 
 const truncateText = (value: string, maxLength = 100): string => {
@@ -417,6 +474,8 @@ const ProfileMenu = ({
   user,
   busy,
   borrowedCount,
+  adminPendingCount,
+  memberUnreadRequestCount,
   onGoogleCredential,
   onLogout,
   onOpenDashboard
@@ -424,6 +483,8 @@ const ProfileMenu = ({
   user: User | null;
   busy: boolean;
   borrowedCount: number;
+  adminPendingCount: number;
+  memberUnreadRequestCount: number;
   onGoogleCredential: (credential: string) => Promise<void>;
   onLogout: () => void;
   onOpenDashboard: () => void;
@@ -460,6 +521,8 @@ const ProfileMenu = ({
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") ?? "U";
+  const userLevel = user ? getLevelInfo(user.readingPoints) : null;
+  const notificationCount = user?.role === "ADMIN" ? adminPendingCount : memberUnreadRequestCount;
 
   return (
     <div className="topbar-actions" ref={rootRef}>
@@ -472,7 +535,16 @@ const ProfileMenu = ({
         onClick={() => setOpen((value) => !value)}
       >
         <span className="profile-avatar">{initials}</span>
+        {notificationCount > 0 && <span className="profile-notification-badge">{notificationCount}</span>}
       </button>
+      {userLevel && (
+        <div className="profile-level-mini" aria-label={`Level ${userLevel.levelNumber}, ${userLevel.progressPercent}% progress`}>
+          <p className="profile-level-label">{`L${userLevel.levelNumber} ${userLevel.levelName}`}</p>
+          <div className="profile-level-track" aria-hidden="true">
+            <span className="profile-level-fill" style={{ width: `${userLevel.progressPercent}%` }} />
+          </div>
+        </div>
+      )}
 
       {open && (
         <section className="profile-dropdown" role="menu" aria-label="Profile menu">
@@ -489,7 +561,10 @@ const ProfileMenu = ({
               <p className="muted">
                 {user.email} | {user.role}
               </p>
+              <p className="muted">{`Level ${userLevel?.levelNumber ?? 1} - ${userLevel?.levelName ?? "Noob"} | ${user.readingPoints} pts`}</p>
               <p className="profile-section-title">Borrowed books: {borrowedCount}</p>
+              {user.role === "ADMIN" && <p className="profile-section-title">Pending requests: {adminPendingCount}</p>}
+              {user.role === "MEMBER" && <p className="profile-section-title">Request updates: {memberUnreadRequestCount}</p>}
               <div className="profile-actions-row">
                 <button
                   className="btn btn-outline profile-btn-small"
@@ -538,6 +613,11 @@ const App = () => {
 
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loansLoading, setLoansLoading] = useState(false);
+  const [borrowRequests, setBorrowRequests] = useState<BorrowRequestItem[]>([]);
+  const [borrowRequestsLoading, setBorrowRequestsLoading] = useState(false);
+  const [borrowRequestActionId, setBorrowRequestActionId] = useState<string | null>(null);
+  const [memberUnreadRequestCount, setMemberUnreadRequestCount] = useState(0);
+  const [adminPendingRequestCount, setAdminPendingRequestCount] = useState(0);
   const [borrowersOverview, setBorrowersOverview] = useState<BorrowerOverview[]>([]);
   const [overdueLoans, setOverdueLoans] = useState<Loan[]>([]);
   const [overdueUsersCount, setOverdueUsersCount] = useState(0);
@@ -705,6 +785,30 @@ const App = () => {
     }
   }, [authRequest]);
 
+  const loadBorrowRequests = useCallback(async () => {
+    if (!user) {
+      setBorrowRequests([]);
+      setMemberUnreadRequestCount(0);
+      setAdminPendingRequestCount(0);
+      return;
+    }
+    setBorrowRequestsLoading(true);
+    try {
+      const query =
+        user.role === "ADMIN"
+          ? "/borrow-requests?status=PENDING&limit=100"
+          : "/borrow-requests?limit=100";
+      const result = await authRequest<BorrowRequestsResponse>(query);
+      setBorrowRequests(result.data);
+      setMemberUnreadRequestCount(result.meta.unreadForMember ?? 0);
+      setAdminPendingRequestCount(result.meta.pendingCount ?? 0);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setBorrowRequestsLoading(false);
+    }
+  }, [authRequest, user]);
+
   const loadRecommendations = useCallback(async () => {
     setRecommendationsLoading(true);
     try {
@@ -755,7 +859,7 @@ const App = () => {
 
   const refreshAfterLoanMutation = useCallback(
     async (options?: { includeRecommendations?: boolean }) => {
-      const tasks: Array<Promise<unknown>> = [loadBooks(), loadLoans(), loadLibraryStats()];
+      const tasks: Array<Promise<unknown>> = [loadBooks(), loadLoans(), loadLibraryStats(), loadBorrowRequests()];
       if (user?.role === "ADMIN") {
         tasks.push(loadAdminOverview());
       }
@@ -764,7 +868,16 @@ const App = () => {
       }
       await Promise.all(tasks);
     },
-    [loadAdminOverview, loadBooks, loadLoans, loadRecommendations, loadLibraryStats, shouldLoadRecommendations, user?.role]
+    [
+      loadAdminOverview,
+      loadBooks,
+      loadBorrowRequests,
+      loadLoans,
+      loadRecommendations,
+      loadLibraryStats,
+      shouldLoadRecommendations,
+      user?.role
+    ]
   );
 
   const bootAuth = useCallback(async () => {
@@ -817,6 +930,9 @@ const App = () => {
   useEffect(() => {
     if (!user) {
       setLoans([]);
+      setBorrowRequests([]);
+      setMemberUnreadRequestCount(0);
+      setAdminPendingRequestCount(0);
       setUsers([]);
       setBorrowersOverview([]);
       setOverdueLoans([]);
@@ -825,8 +941,18 @@ const App = () => {
       setShowDueSoonDetails(false);
       return;
     }
-    void Promise.all([loadLoans(), loadUsers(), loadAdminOverview()]);
-  }, [loadAdminOverview, loadLoans, loadUsers, user]);
+    void Promise.all([loadLoans(), loadBorrowRequests(), loadUsers(), loadAdminOverview()]);
+  }, [loadAdminOverview, loadBorrowRequests, loadLoans, loadUsers, user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadBorrowRequests();
+    }, 25_000);
+    return () => window.clearInterval(timer);
+  }, [loadBorrowRequests, user]);
 
   useEffect(() => {
     if (booting || !shouldLoadRecommendations) {
@@ -904,6 +1030,9 @@ const App = () => {
       setShowDueSoonDetails(false);
       setShouldLoadRecommendations(false);
       setRecommendations([]);
+      setBorrowRequests([]);
+      setMemberUnreadRequestCount(0);
+      setAdminPendingRequestCount(0);
       setActiveBookId(null);
       setBookDetails(null);
       if (window.location.pathname !== "/") {
@@ -949,6 +1078,10 @@ const App = () => {
       });
   }, [activeLoans, myActiveLoans, user]);
   const dueSoonCount = dueSoonLoans.length;
+  const pendingBorrowRequests = useMemo(
+    () => borrowRequests.filter((request) => request.status === "PENDING"),
+    [borrowRequests]
+  );
 
   const openBookDetails = useCallback((bookId: string) => {
     if (window.location.pathname !== `/books/${bookId}`) {
@@ -1103,7 +1236,14 @@ const App = () => {
     closeBookDetails();
     setViewMode("dashboard");
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [closeBookDetails, user]);
+    if (user.role === "MEMBER") {
+      void authRequest("/borrow-requests/me/mark-seen", { method: "POST" })
+        .then(() => loadBorrowRequests())
+        .catch(() => {
+          // no-op: notification ack failure should not block dashboard
+        });
+    }
+  }, [authRequest, closeBookDetails, loadBorrowRequests, user]);
 
   const scrollToRecommendations = useCallback(() => {
     setShouldLoadRecommendations(true);
@@ -1207,32 +1347,45 @@ const App = () => {
     }
     try {
       setCheckoutPendingIds((current) => [...current, bookId]);
-      setMessage("Borrowing book...");
-      await authRequest("/loans/checkout", {
-        method: "POST",
-        body: { bookId }
-      });
+      if (user?.role === "ADMIN") {
+        setMessage("Borrowing book...");
+        await authRequest("/loans/checkout", {
+          method: "POST",
+          body: { bookId }
+        });
 
-      // Optimistic local update for instant feedback.
-      setBooks((current) =>
-        current.map((book) => (book.id === bookId ? { ...book, available: false } : book))
-      );
-      setLibraryStats((current) =>
-        current
-          ? {
-              ...current,
-              availableBooks: Math.max(0, current.availableBooks - 1),
-              checkedOutBooks: current.checkedOutBooks + 1,
-              activeLoans: current.activeLoans + 1
-            }
-          : current
-      );
-      setRecommendations((current) =>
-        current.map((book) => (book.id === bookId ? { ...book, available: false } : book))
-      );
-
-      setMessage("Book checked out (borrowed).");
-      // Background sync (does not block UI response).
+        // Optimistic local update for instant feedback.
+        setBooks((current) =>
+          current.map((book) => (book.id === bookId ? { ...book, available: false, requestPending: false } : book))
+        );
+        setLibraryStats((current) =>
+          current
+            ? {
+                ...current,
+                availableBooks: Math.max(0, current.availableBooks - 1),
+                checkedOutBooks: current.checkedOutBooks + 1,
+                activeLoans: current.activeLoans + 1
+              }
+            : current
+        );
+        setRecommendations((current) =>
+          current.map((book) => (book.id === bookId ? { ...book, available: false, requestPending: false } : book))
+        );
+        setMessage("Book checked out (borrowed).");
+      } else {
+        setMessage("Submitting borrow request...");
+        await authRequest("/borrow-requests", {
+          method: "POST",
+          body: { bookId }
+        });
+        setBooks((current) =>
+          current.map((book) => (book.id === bookId ? { ...book, requestPending: true } : book))
+        );
+        setRecommendations((current) =>
+          current.map((book) => (book.id === bookId ? { ...book, requestPending: true } : book))
+        );
+        setMessage("Borrow request submitted. Waiting for admin approval.");
+      }
       void refreshAfterLoanMutation({ includeRecommendations: false });
     } catch (error) {
       setMessage(parseApiError(error));
@@ -1241,13 +1394,53 @@ const App = () => {
     }
   };
 
+  const approveBorrowRequest = async (requestId: string) => {
+    try {
+      setBorrowRequestActionId(requestId);
+      await authRequest(`/borrow-requests/${requestId}/approve`, { method: "POST" });
+      setMessage("Borrow request approved.");
+      await Promise.all([loadBorrowRequests(), refreshAfterLoanMutation({ includeRecommendations: false })]);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setBorrowRequestActionId(null);
+    }
+  };
+
+  const declineBorrowRequest = async (requestId: string) => {
+    try {
+      setBorrowRequestActionId(requestId);
+      await authRequest(`/borrow-requests/${requestId}/decline`, { method: "POST" });
+      setMessage("Borrow request declined.");
+      await Promise.all([loadBorrowRequests(), refreshAfterLoanMutation({ includeRecommendations: false })]);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setBorrowRequestActionId(null);
+    }
+  };
+
   const checkinBook = async (bookId: string) => {
     try {
-      await authRequest("/loans/checkin", {
+      const response = await authRequest<{ data: Loan; meta?: { awardedPoints?: number } }>("/loans/checkin", {
         method: "POST",
         body: { bookId }
       });
-      setMessage("Book checked in (returned).");
+      if (user && response.data.userId === user.id) {
+        setUser((current) =>
+          current
+            ? {
+                ...current,
+                readingPoints: response.data.user.readingPoints
+              }
+            : current
+        );
+      }
+      const pointsLabel =
+        response.meta?.awardedPoints && response.meta.awardedPoints > 0
+          ? ` +${response.meta.awardedPoints} points`
+          : "";
+      setMessage(`Book checked in (returned).${pointsLabel}`);
       // Background sync (does not block UI response).
       void refreshAfterLoanMutation({ includeRecommendations: false });
     } catch (error) {
@@ -1426,6 +1619,8 @@ const App = () => {
           user={user}
           busy={signingIn}
           borrowedCount={myActiveLoans.length}
+          adminPendingCount={adminPendingRequestCount}
+          memberUnreadRequestCount={memberUnreadRequestCount}
           onGoogleCredential={loginWithGoogleCredential}
           onLogout={logout}
           onOpenDashboard={openUserDashboard}
@@ -1470,8 +1665,16 @@ const App = () => {
                         ? `${bookDetails.reviewSummary.averageRating.toFixed(1)} (${bookDetails.reviewSummary.count})`
                         : "No community reviews yet"}
                     </p>
-                    <p className={`status-pill ${bookDetails.book.available ? "available" : "unavailable"}`}>
-                      {bookDetails.book.available ? "Checked in (returned)" : "Checked out (borrowed)"}
+                    <p
+                      className={`status-pill ${
+                        bookDetails.book.requestPending ? "pending" : bookDetails.book.available ? "available" : "unavailable"
+                      }`}
+                    >
+                      {bookDetails.book.requestPending
+                        ? "Pending approval"
+                        : bookDetails.book.available
+                          ? "Checked in (returned)"
+                          : "Checked out (borrowed)"}
                     </p>
                     <p className="book-detail-description">
                       {bookDetails.book.description ?? "No summary available for this book yet."}
@@ -1494,16 +1697,26 @@ const App = () => {
                       {bookDetails.book.available ? (
                         (() => {
                           const isPending = checkoutPendingIds.includes(bookDetails.book.id);
+                          const hasPendingRequest = bookDetails.book.requestPending;
+                          const actionLabel = hasPendingRequest ? "Pending" : user?.role === "ADMIN" ? "Borrow" : "Request";
                           return (
                             <button
                               className={`btn${isPending ? " is-loading" : ""}`}
                               type="button"
                               onClick={() => void checkoutBook(bookDetails.book.id)}
-                              disabled={!canBorrow || isPending}
+                              disabled={!canBorrow || isPending || hasPendingRequest}
                               aria-busy={isPending}
-                              aria-label={isPending ? "Borrowing in progress" : canBorrow ? "Borrow" : "Sign in"}
+                              aria-label={
+                                hasPendingRequest
+                                  ? "Book has a pending request"
+                                  : isPending
+                                    ? "Request in progress"
+                                    : canBorrow
+                                      ? actionLabel
+                                      : "Sign in"
+                              }
                             >
-                              {canBorrow ? "Borrow" : "Sign in"}
+                              {hasPendingRequest ? "Pending" : canBorrow ? actionLabel : "Sign in"}
                             </button>
                           );
                         })()
@@ -1585,6 +1798,7 @@ const App = () => {
                           <div>
                             <p className="review-head">
                               <strong>{review.user.name}</strong>
+                              <span>{`L${getLevelInfo(review.user.readingPoints).levelNumber}`}</span>
                             </p>
                             <p className="review-rating-line">{`Rating: ${review.rating}/5`}</p>
                             <p className="review-text">{review.content}</p>
@@ -1637,8 +1851,16 @@ const App = () => {
                             <BookRating book={relatedBook} />
                           </header>
                         </div>
-                        <p className={`status-pill ${relatedBook.available ? "available" : "unavailable"}`}>
-                          {relatedBook.available ? "Checked in (returned)" : "Checked out (borrowed)"}
+                        <p
+                          className={`status-pill ${
+                            relatedBook.requestPending ? "pending" : relatedBook.available ? "available" : "unavailable"
+                          }`}
+                        >
+                          {relatedBook.requestPending
+                            ? "Pending approval"
+                            : relatedBook.available
+                              ? "Checked in (returned)"
+                              : "Checked out (borrowed)"}
                         </p>
                         <p className="book-genre">{truncateText(relatedBook.genre ?? "Uncategorized", 80)}</p>
                       </article>
@@ -1892,8 +2114,16 @@ const App = () => {
                             <BookRating book={book} />
                           </header>
                         </div>
-                        <p className={`status-pill ${book.available ? "available" : "unavailable"}`}>
-                          {book.available ? "Checked in (returned)" : "Checked out (borrowed)"}
+                        <p
+                          className={`status-pill ${
+                            book.requestPending ? "pending" : book.available ? "available" : "unavailable"
+                          }`}
+                        >
+                          {book.requestPending
+                            ? "Pending approval"
+                            : book.available
+                              ? "Checked in (returned)"
+                              : "Checked out (borrowed)"}
                         </p>
                         <p className="book-genre">{truncateText(book.genre ?? "Uncategorized", 80)}</p>
                         <p className="muted clamp-3">
@@ -1909,16 +2139,26 @@ const App = () => {
                           {book.available ? (
                             (() => {
                               const isPending = checkoutPendingIds.includes(book.id);
+                              const hasPendingRequest = book.requestPending;
+                              const actionLabel = hasPendingRequest ? "Pending" : user?.role === "ADMIN" ? "Borrow" : "Request";
                               return (
                                 <button
                                   className={`btn${isPending ? " is-loading" : ""}`}
                                   type="button"
                                   onClick={() => void checkoutBook(book.id)}
-                                  disabled={!canBorrow || isPending}
+                                  disabled={!canBorrow || isPending || hasPendingRequest}
                                   aria-busy={isPending}
-                                  aria-label={isPending ? "Borrowing in progress" : canBorrow ? "Borrow" : "Sign in"}
+                                  aria-label={
+                                    hasPendingRequest
+                                      ? "Book has a pending request"
+                                      : isPending
+                                        ? "Request in progress"
+                                        : canBorrow
+                                          ? actionLabel
+                                          : "Sign in"
+                                  }
                                 >
-                                  {canBorrow ? "Borrow" : "Sign in"}
+                                  {hasPendingRequest ? "Pending" : canBorrow ? actionLabel : "Sign in"}
                                 </button>
                               );
                             })()
@@ -2000,21 +2240,32 @@ const App = () => {
                         {book.available && (
                           (() => {
                             const isPending = checkoutPendingIds.includes(book.id);
+                            const hasPendingRequest = book.requestPending;
+                            const actionLabel = hasPendingRequest ? "Pending" : user?.role === "ADMIN" ? "Borrow" : "Request";
                             return (
                               <button
                                 className={`btn shelf-btn${isPending ? " is-loading" : ""}`}
                                 type="button"
                                 onClick={() => void checkoutBook(book.id)}
-                                disabled={!canBorrow || isPending}
+                                disabled={!canBorrow || isPending || hasPendingRequest}
                                 aria-busy={isPending}
-                                aria-label={isPending ? "Borrowing in progress" : canBorrow ? "Borrow" : "Sign in"}
+                                aria-label={
+                                  hasPendingRequest
+                                    ? "Book has a pending request"
+                                    : isPending
+                                      ? "Request in progress"
+                                      : canBorrow
+                                        ? actionLabel
+                                        : "Sign in"
+                                }
                               >
-                                {canBorrow ? "Borrow" : "Sign in"}
+                                {hasPendingRequest ? "Pending" : canBorrow ? actionLabel : "Sign in"}
                               </button>
                             );
                           })()
                         )}
                         {!book.available && <p className="muted shelf-status">Checked out (borrowed)</p>}
+                        {book.available && book.requestPending && <p className="muted shelf-status">Pending approval</p>}
                       </article>
                     ))}
                   </div>
@@ -2087,7 +2338,8 @@ const App = () => {
                       <div>
                         <strong>{loan.book.title}</strong>
                         <p className="muted">
-                          Borrowed by {loan.user.name} on {new Date(loan.checkedOutAt).toLocaleDateString()}
+                          Borrowed by {loan.user.name} (L{getLevelInfo(loan.user.readingPoints).levelNumber}) on{" "}
+                          {new Date(loan.checkedOutAt).toLocaleDateString()}
                         </p>
                         <p className={loan.dueAt && new Date(loan.dueAt) < new Date() ? "overdue-text" : "muted"}>
                           Due: {loan.dueAt ? new Date(loan.dueAt).toLocaleDateString() : "Not set"}
@@ -2121,6 +2373,79 @@ const App = () => {
                     </li>
                   ))}
                 </ul>
+              </section>
+
+              <section aria-labelledby="borrow-requests-title">
+                <div className="panel-head">
+                  <h2 id="borrow-requests-title">
+                    {user.role === "ADMIN" ? "Pending borrow requests" : "My request updates"}
+                  </h2>
+                  <button
+                    className="btn btn-outline"
+                    type="button"
+                    onClick={() => void loadBorrowRequests()}
+                    disabled={borrowRequestsLoading}
+                  >
+                    {borrowRequestsLoading ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+                {user.role === "ADMIN" ? (
+                  <ul className="stack-list">
+                    {pendingBorrowRequests.length === 0 && <li className="muted">No pending requests.</li>}
+                    {pendingBorrowRequests.map((request) => (
+                      <li key={request.id} className="row-item">
+                        <div>
+                          <strong>{request.book.title}</strong>
+                          <p className="muted">
+                            Requested by {request.user.name} on {new Date(request.createdAt).toLocaleDateString()}
+                          </p>
+                          <p className="muted">{`Borrower level: L${getLevelInfo(request.user.readingPoints).levelNumber}`}</p>
+                        </div>
+                        <div className="row-actions">
+                          <button
+                            className="btn"
+                            type="button"
+                            disabled={borrowRequestActionId === request.id}
+                            onClick={() => void approveBorrowRequest(request.id)}
+                          >
+                            {borrowRequestActionId === request.id ? "Working..." : "Approve"}
+                          </button>
+                          <button
+                            className="btn btn-outline"
+                            type="button"
+                            disabled={borrowRequestActionId === request.id}
+                            onClick={() => void declineBorrowRequest(request.id)}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <ul className="stack-list">
+                    {borrowRequests.length === 0 && <li className="muted">No borrow requests yet.</li>}
+                    {borrowRequests.map((request) => (
+                      <li key={request.id} className="row-item">
+                        <div>
+                          <strong>{request.book.title}</strong>
+                          <p className="muted">{`Requested on ${new Date(request.createdAt).toLocaleDateString()}`}</p>
+                          <p
+                            className={
+                              request.status === "DECLINED"
+                                ? "overdue-text"
+                                : request.status === "APPROVED"
+                                  ? "notice"
+                                  : "muted"
+                            }
+                          >
+                            Status: {request.status}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </section>
             </section>
           </>
@@ -2237,6 +2562,7 @@ const App = () => {
                   <header>
                     <h3>{borrower.user.name}</h3>
                     <p className="muted">{borrower.user.email}</p>
+                    <p className="muted">{`Level L${getLevelInfo(borrower.user.readingPoints).levelNumber}`}</p>
                     <p className={borrower.overdueCount > 0 ? "overdue-text" : "muted"}>
                       Active books: {borrower.activeLoans.length} | Overdue: {borrower.overdueCount}
                     </p>
@@ -2284,6 +2610,7 @@ const App = () => {
                     <th>Contact email</th>
                     <th>Phone</th>
                     <th>ID</th>
+                    <th>Level</th>
                     <th>Role</th>
                     <th>Update</th>
                   </tr>
@@ -2296,6 +2623,7 @@ const App = () => {
                       <td>{member.contactEmail ?? member.email}</td>
                       <td>{member.phoneNumber ?? "Missing"}</td>
                       <td>{member.personalId ?? "-"}</td>
+                      <td>{`L${getLevelInfo(member.readingPoints).levelNumber}`}</td>
                       <td>{member.role}</td>
                       <td>
                         <label className="sr-only" htmlFor={`role-${member.id}`}>

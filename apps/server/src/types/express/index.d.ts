@@ -9,6 +9,7 @@ declare global {
         contactEmail: string | null;
         phoneNumber: string | null;
         personalId: string | null;
+        readingPoints: number;
       };
     }
   }

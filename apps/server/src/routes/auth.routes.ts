@@ -96,7 +96,8 @@ router.post(
             name: true,
             contactEmail: true,
             phoneNumber: true,
-            personalId: true
+            personalId: true,
+            readingPoints: true
           }
         })
       : await prisma.user.create({
@@ -114,7 +115,8 @@ router.post(
             name: true,
             contactEmail: true,
             phoneNumber: true,
-            personalId: true
+            personalId: true,
+            readingPoints: true
           }
         });
 

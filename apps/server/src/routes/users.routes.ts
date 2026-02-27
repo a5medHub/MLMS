@@ -33,6 +33,7 @@ router.get(
         contactEmail: true,
         phoneNumber: true,
         personalId: true,
+        readingPoints: true,
         role: true,
         createdAt: true
       },
@@ -80,6 +81,7 @@ router.patch(
           contactEmail: true,
           phoneNumber: true,
           personalId: true,
+          readingPoints: true,
           role: true,
           createdAt: true
         }
@@ -141,6 +143,7 @@ router.patch(
         contactEmail: true,
         phoneNumber: true,
         personalId: true,
+        readingPoints: true,
         role: true,
         createdAt: true
       }

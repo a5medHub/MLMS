@@ -52,6 +52,7 @@ router.get(
       averageRating: number | null;
       ratingsCount: number | null;
       available: boolean;
+      requestPending: boolean;
       createdAt: Date;
       updatedAt: Date;
     }>;
@@ -86,7 +87,8 @@ router.get(
       books = legacyBooks.map((book) => ({
         ...book,
         averageRating: null,
-        ratingsCount: null
+        ratingsCount: null,
+        requestPending: false
       }));
     }
 

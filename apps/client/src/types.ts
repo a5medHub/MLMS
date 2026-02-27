@@ -7,6 +7,7 @@ export type User = {
   contactEmail: string | null;
   phoneNumber: string | null;
   personalId: string | null;
+  readingPoints: number;
   role: Role;
   createdAt?: string;
 };
@@ -24,6 +25,7 @@ export type Book = {
   ratingsCount: number | null;
   aiMetadata: boolean;
   available: boolean;
+  requestPending: boolean;
   createdAt: string;
 };
 
@@ -35,5 +37,5 @@ export type Loan = {
   dueAt: string | null;
   returnedAt: string | null;
   book: Book;
-  user: Pick<User, "id" | "name" | "email" | "role" | "contactEmail" | "phoneNumber" | "personalId">;
+  user: Pick<User, "id" | "name" | "email" | "role" | "contactEmail" | "phoneNumber" | "personalId" | "readingPoints">;
 };
