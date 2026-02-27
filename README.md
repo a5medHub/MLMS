@@ -14,6 +14,7 @@ Full-stack implementation of **Version 1: Mini Library Management System Challen
 - Unique `personalId` enforcement at DB level
 - AI recommendations + due-date estimate endpoint
 - Fallback book data + caching + race-safe checkout
+- PWA-ready client with mobile/tablet install prompt
 - Mobile-first, accessible UI
 - Lazy-loaded recommendations + code-split frontend bundles
 
@@ -79,6 +80,21 @@ npm run dev
 - API: `http://localhost:4000`
 - Client: `http://localhost:5173`
 
+## PWA Install (Mobile/Tablet)
+
+The client is configured as a Progressive Web App:
+
+- `apps/client/public/manifest.webmanifest`
+- `apps/client/public/sw.js`
+- app icons in `apps/client/public/icons/`
+
+Behavior:
+
+- On mobile/tablet, users see an install popup (`Install app`).
+- Android/Chromium: uses native install prompt when available.
+- iOS Safari: shows manual hint (`Share` -> `Add to Home Screen`).
+- Prompt is dismissed per device using local storage.
+
 ## API Quick Map
 
 - `GET /health` - health check
@@ -132,6 +148,25 @@ Base API path: `/api/v1`
   - `{"error":{"message":"Route not found"}}`
 - Non-API routes are served by the built React app (`client/dist`) in production.
 - Recommendation data is lazy-fetched when the recommendations section is reached or clicked.
+
+## AI Workload Profile
+
+AI is used in multiple paths, so it can create meaningful backend load depending on usage:
+
+- `POST /api/v1/ai/recommendations`
+  - Personalized recommendations from user history, ratings, and favorites.
+  - Triggered when recommendations are requested/visible (lazy-loaded on client).
+- `POST /api/v1/ai/due-date-estimate`
+  - Estimates due dates from reading-time signals and metadata.
+- Metadata enrichment flows
+  - Admin import/enrichment can call external book sources and AI-based fill logic for missing fields (genre, rating, cover, author fallback flags).
+
+Operational impact:
+
+- Low load in normal member browsing.
+- Medium/high load during admin bulk import + metadata enrichment.
+- Recommendation calls are bounded by client lazy loading and API limits.
+- Caching/fallback behavior reduces repeated misses and external round trips.
 
 ## Security Baseline
 

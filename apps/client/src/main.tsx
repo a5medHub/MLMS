@@ -12,6 +12,12 @@ const UiOptionsPreview = lazy(() =>
 const params = new URLSearchParams(window.location.search);
 const isUiPreview = params.get("preview") === "ui";
 
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Suspense fallback={<main className="auth-shell"><section className="auth-card"><p>Loading...</p></section></main>}>

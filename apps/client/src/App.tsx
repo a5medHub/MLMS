@@ -142,6 +142,11 @@ type BookDetailsResponse = {
   };
 };
 
+type DeferredInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
+
 type ImportProvider = "auto" | "openlibrary" | "google";
 type ViewMode = "catalog" | "dashboard" | "settings";
 type AvatarPreset = {
@@ -232,6 +237,7 @@ const backgroundPresets: BackgroundPreset[] = [
 ];
 const defaultAvatarPresetId = avatarPresets[0].id;
 const defaultBackgroundPresetId = backgroundPresets[0].id;
+const installPromptDismissStorageKey = "mlms_install_prompt_dismissed";
 
 const getAvatarPreset = (id: string | null | undefined): AvatarPreset => {
   return avatarPresets.find((preset) => preset.id === id) ?? avatarPresets[0];
@@ -333,6 +339,26 @@ const truncateText = (value: string, maxLength = 100): string => {
 const getBookIdFromPath = (): string | null => {
   const match = window.location.pathname.match(/^\/books\/([^/]+)$/);
   return match ? decodeURIComponent(match[1]) : null;
+};
+
+const isMobileOrTabletDevice = (): boolean => {
+  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+  const compactViewport = window.matchMedia("(max-width: 1024px)").matches;
+  const userAgent = navigator.userAgent;
+  const mobileTabletUa = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(userAgent);
+  return compactViewport || (coarsePointer && mobileTabletUa);
+};
+
+const isIosDevice = (): boolean => {
+  const userAgent = navigator.userAgent;
+  const platform = navigator.platform;
+  const touchMac = platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  return /iPad|iPhone|iPod/.test(userAgent) || touchMac;
+};
+
+const isStandaloneMode = (): boolean => {
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true;
 };
 
 const isInteractiveTarget = (target: EventTarget | null): boolean => {
@@ -858,6 +884,10 @@ const App = () => {
   const [savingNote, setSavingNote] = useState(false);
   const [shareFeedback, setShareFeedback] = useState("");
   const [adminLogs, setAdminLogs] = useState<UiLogEntry[]>([]);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<DeferredInstallPromptEvent | null>(null);
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
+  const [iosInstallHint, setIosInstallHint] = useState(false);
+  const [installPromptBusy, setInstallPromptBusy] = useState(false);
 
   const tokenRef = useRef<string | null>(accessToken);
 
@@ -1239,6 +1269,45 @@ const App = () => {
     document.body.style.color = user?.backgroundPreset === "bg-9" ? "#f1f5f9" : "";
   }, [user?.backgroundPreset]);
 
+  useEffect(() => {
+    if (!isMobileOrTabletDevice()) {
+      return;
+    }
+    if (isStandaloneMode()) {
+      return;
+    }
+    if (localStorage.getItem(installPromptDismissStorageKey) === "1") {
+      return;
+    }
+
+    if (isIosDevice()) {
+      setIosInstallHint(true);
+      setShowInstallPrompt(true);
+      return;
+    }
+
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setIosInstallHint(false);
+      setDeferredInstallPrompt(event as DeferredInstallPromptEvent);
+      setShowInstallPrompt(true);
+    };
+
+    const onAppInstalled = () => {
+      localStorage.setItem(installPromptDismissStorageKey, "1");
+      setDeferredInstallPrompt(null);
+      setShowInstallPrompt(false);
+    };
+
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt as EventListener);
+    window.addEventListener("appinstalled", onAppInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt as EventListener);
+      window.removeEventListener("appinstalled", onAppInstalled);
+    };
+  }, []);
+
   const loginWithGoogleCredential = useCallback(async (credential: string) => {
     try {
       setSigningIn(true);
@@ -1505,6 +1574,32 @@ const App = () => {
     setViewMode("catalog");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [closeBookDetails]);
+
+  const dismissInstallPrompt = useCallback(() => {
+    localStorage.setItem(installPromptDismissStorageKey, "1");
+    setShowInstallPrompt(false);
+    setDeferredInstallPrompt(null);
+  }, []);
+
+  const installAsApp = useCallback(async () => {
+    if (!deferredInstallPrompt) {
+      return;
+    }
+    try {
+      setInstallPromptBusy(true);
+      await deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+      if (choice.outcome === "accepted") {
+        localStorage.setItem(installPromptDismissStorageKey, "1");
+        setShowInstallPrompt(false);
+      }
+      setDeferredInstallPrompt(null);
+    } catch {
+      setMessage("Install prompt is unavailable right now.");
+    } finally {
+      setInstallPromptBusy(false);
+    }
+  }, [deferredInstallPrompt]);
 
   const scrollToRecommendations = useCallback(() => {
     setShouldLoadRecommendations(true);
@@ -1969,6 +2064,31 @@ const App = () => {
           onOpenSettings={openUserSettings}
         />
       </header>
+
+      {showInstallPrompt && (
+        <aside className="install-prompt" role="dialog" aria-label="Install MLMS as an app">
+          <p className="eyebrow">Install MLMS</p>
+          <h2>Add to your home screen</h2>
+          {!iosInstallHint && (
+            <p className="muted">Install this app for faster mobile/tablet access and a full-screen experience.</p>
+          )}
+          {iosInstallHint && (
+            <p className="muted">
+              On iPhone/iPad Safari: tap <strong>Share</strong> then <strong>Add to Home Screen</strong>.
+            </p>
+          )}
+          <div className="install-prompt-actions">
+            {!iosInstallHint && (
+              <button className="btn" type="button" onClick={() => void installAsApp()} disabled={installPromptBusy}>
+                {installPromptBusy ? "Opening..." : "Install app"}
+              </button>
+            )}
+            <button className="btn btn-outline" type="button" onClick={dismissInstallPrompt}>
+              Not now
+            </button>
+          </div>
+        </aside>
+      )}
 
       <main id="main-content" className="page">
         {(activeBookId || viewMode !== "catalog") && (
