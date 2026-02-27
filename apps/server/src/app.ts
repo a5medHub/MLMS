@@ -33,8 +33,12 @@ app.use(
           "data:",
           "https://books.google.com",
           "http://books.google.com",
+          "https://books.googleusercontent.com",
+          "https://*.books.googleusercontent.com",
           "https://covers.openlibrary.org",
           "http://covers.openlibrary.org",
+          "https://*.gstatic.com",
+          "https://gstatic.com",
           "https://*.googleusercontent.com",
           "https://lh3.googleusercontent.com"
         ],

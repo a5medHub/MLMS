@@ -116,10 +116,14 @@ const truncateText = (value: string, maxLength = 100): string => {
   return `${value.slice(0, maxLength - 1).trimEnd()}...`;
 };
 
+const normalizeCoverUrl = (value: string): string => {
+  return value.startsWith("http://") ? `https://${value.slice("http://".length)}` : value;
+};
+
 const getBookCoverCandidates = (book: Book): string[] => {
   const candidates: string[] = [];
   if (book.coverUrl) {
-    candidates.push(book.coverUrl);
+    candidates.push(normalizeCoverUrl(book.coverUrl));
   }
   if (book.isbn) {
     candidates.push(`https://covers.openlibrary.org/b/isbn/${book.isbn}-L.jpg`);

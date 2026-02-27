@@ -54,6 +54,16 @@ const normalizeText = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const normalizeCoverUrl = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  if (value.startsWith("http://")) {
+    return `https://${value.slice("http://".length)}`;
+  }
+  return value;
+};
+
 const normalizeIsbn = (input: string): string | null => {
   const cleaned = input.replace(/[^0-9Xx]/g, "").toUpperCase();
   if (cleaned.length === 10 || cleaned.length === 13) {
@@ -273,7 +283,9 @@ const searchGoogleBooks = async (query: string, limit: number): Promise<External
         genre: normalizeText(info?.categories?.[0]) ?? null,
         publishedYear: parsePublishedYear(info?.publishedDate),
         description: normalizeText(info?.description),
-        coverUrl: normalizeText(info?.imageLinks?.thumbnail) ?? normalizeText(info?.imageLinks?.smallThumbnail),
+        coverUrl: normalizeCoverUrl(
+          normalizeText(info?.imageLinks?.thumbnail) ?? normalizeText(info?.imageLinks?.smallThumbnail)
+        ),
         averageRating: parseAverageRating(info?.averageRating),
         ratingsCount: parseRatingsCount(info?.ratingsCount),
         source: "google"
