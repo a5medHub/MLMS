@@ -533,16 +533,20 @@ const ProfileMenu = ({
         aria-expanded={open}
         aria-label={user ? `Open profile menu for ${user.name}` : "Open profile menu"}
         onClick={() => setOpen((value) => !value)}
+        style={
+          userLevel
+            ? {
+                background: `conic-gradient(#4f8cd4 ${userLevel.progressPercent}%, #d9e1eb ${userLevel.progressPercent}% 100%)`
+              }
+            : undefined
+        }
       >
         <span className="profile-avatar">{initials}</span>
         {notificationCount > 0 && <span className="profile-notification-badge">{notificationCount}</span>}
       </button>
       {userLevel && (
         <div className="profile-level-mini" aria-label={`Level ${userLevel.levelNumber}, ${userLevel.progressPercent}% progress`}>
-          <p className="profile-level-label">{`L${userLevel.levelNumber} ${userLevel.levelName}`}</p>
-          <div className="profile-level-track" aria-hidden="true">
-            <span className="profile-level-fill" style={{ width: `${userLevel.progressPercent}%` }} />
-          </div>
+          <p className="profile-level-label">{userLevel.levelName}</p>
         </div>
       )}
 
