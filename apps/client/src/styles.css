@@ -221,6 +221,7 @@ body {
 .catalog-head-cards {
   display: grid;
   gap: 0.8rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .catalog-head-card {
@@ -762,6 +763,18 @@ label {
   z-index: 60;
 }
 
+.profile-dropdown-compact {
+  width: max-content;
+  min-width: 190px;
+  max-width: min(90vw, 240px);
+  gap: 0.4rem;
+  padding: 0.6rem;
+}
+
+.profile-dropdown-compact .muted {
+  margin-top: 0.1rem;
+}
+
 .profile-title {
   margin: 0;
   font-family: "Space Grotesk", sans-serif;
@@ -804,6 +817,30 @@ label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.profile-icon-svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: currentColor;
+}
+
+.profile-icon-dashboard {
+  color: #2a69c7;
+  border-color: #bed4f4;
+  background: #edf4ff;
+}
+
+.profile-icon-settings {
+  color: #0f766e;
+  border-color: #b7e0da;
+  background: #ebf8f6;
+}
+
+.profile-icon-logout {
+  color: #c2410c;
+  border-color: #f3c7b2;
+  background: #fff2ea;
 }
 
 .appearance-grid {
@@ -1128,10 +1165,6 @@ label {
 }
 
 @media (max-width: 640px) {
-  
-  .catalog-head-cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 
   .catalog-head-card.panel {
     padding: 0.72rem 0.8rem;

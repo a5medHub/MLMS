@@ -421,6 +421,27 @@ const FavoriteStarButton = ({
   );
 };
 
+const DashboardIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" className="profile-icon-svg">
+    <rect x="3" y="11" width="4" height="10" rx="1.2" />
+    <rect x="10" y="7" width="4" height="14" rx="1.2" />
+    <rect x="17" y="3" width="4" height="18" rx="1.2" />
+  </svg>
+);
+
+const SettingsIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" className="profile-icon-svg">
+    <path d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.24 7.24 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42L8.2 5.32a7.24 7.24 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L1.66 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0-.05.94c0 .32.02.63.05.94L1.78 14.52a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.58-.22 1.13-.54 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.4a3.4 3.4 0 1 1 0-6.8 3.4 3.4 0 0 1 0 6.8Z" />
+  </svg>
+);
+
+const LogoutIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" className="profile-icon-svg">
+    <path d="M15.75 4.5v3a.75.75 0 0 1-1.5 0v-3A1.5 1.5 0 0 0 12.75 3h-7.5a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 5.25 21h7.5a1.5 1.5 0 0 0 1.5-1.5v-3a.75.75 0 0 1 1.5 0v3a3 3 0 0 1-3 3h-7.5a3 3 0 0 1-3-3v-15a3 3 0 0 1 3-3h7.5a3 3 0 0 1 3 3Z" />
+    <path d="M21.53 12.53a.75.75 0 0 0 0-1.06l-3-3a.75.75 0 0 0-1.06 1.06l1.72 1.72H9a.75.75 0 0 0 0 1.5h10.19l-1.72 1.72a.75.75 0 0 0 1.06 1.06l3-3Z" />
+  </svg>
+);
+
 const BookCover = ({ book, className }: { book: Book; className: string }) => {
   const [candidateIndex, setCandidateIndex] = useState(0);
   const coverCandidates = useMemo(() => getBookCoverCandidates(book), [book]);
@@ -703,7 +724,7 @@ const ProfileMenu = ({
       )}
 
       {open && (
-        <section className="profile-dropdown" role="menu" aria-label="Profile menu">
+        <section className={`profile-dropdown${user ? " profile-dropdown-compact" : ""}`} role="menu" aria-label="Profile menu">
           {!user ? (
             <>
               <p className="profile-title">Guest mode</p>
@@ -718,7 +739,7 @@ const ProfileMenu = ({
               <p className="muted">{`Level ${userLevel?.levelNumber ?? 1}`}</p>
               <div className="profile-actions-row">
                 <button
-                  className="btn btn-outline profile-btn-small profile-icon-btn"
+                  className="btn btn-outline profile-btn-small profile-icon-btn profile-icon-dashboard"
                   type="button"
                   aria-label="Open dashboard"
                   title={`Dashboard (${borrowedCount} borrowed)`}
@@ -727,10 +748,10 @@ const ProfileMenu = ({
                     setOpen(false);
                   }}
                 >
-                  📊
+                  <DashboardIcon />
                 </button>
                 <button
-                  className="btn btn-outline profile-btn-small profile-icon-btn"
+                  className="btn btn-outline profile-btn-small profile-icon-btn profile-icon-settings"
                   type="button"
                   aria-label="Open settings"
                   title="Settings"
@@ -739,10 +760,10 @@ const ProfileMenu = ({
                     setOpen(false);
                   }}
                 >
-                  ⚙
+                  <SettingsIcon />
                 </button>
                 <button
-                  className="btn btn-outline profile-btn-small profile-icon-btn"
+                  className="btn btn-outline profile-btn-small profile-icon-btn profile-icon-logout"
                   aria-label={user.role === "ADMIN" ? `Sign out (pending: ${adminPendingCount})` : `Sign out (updates: ${memberUnreadRequestCount})`}
                   title="Sign out"
                   onClick={() => {
@@ -751,7 +772,7 @@ const ProfileMenu = ({
                   }}
                   type="button"
                 >
-                  ⎋
+                  <LogoutIcon />
                 </button>
               </div>
             </>
