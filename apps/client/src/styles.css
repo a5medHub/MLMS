@@ -469,11 +469,96 @@ label {
   will-change: transform;
 }
 
+.clickable-card {
+  cursor: pointer;
+}
+
+.clickable-card:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .book-card:hover,
 .book-card:focus-within {
   transform: scale(1.03);
   box-shadow: 0 16px 36px rgba(20, 30, 45, 0.2);
   z-index: 2;
+}
+
+.book-detail-page {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.book-detail-head {
+  justify-content: flex-start;
+}
+
+.book-detail-hero {
+  display: grid;
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.book-detail-summary {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.detail-author {
+  font-size: 1.1rem;
+}
+
+.book-detail-description {
+  margin: 0.25rem 0 0.3rem;
+  line-height: 1.5;
+}
+
+.book-detail-meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.book-detail-meta p {
+  margin: 0;
+}
+
+.book-interaction-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.review-editor {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.reviews-list .review-item {
+  align-items: flex-start;
+}
+
+.review-head {
+  margin: 0;
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.review-rating-line {
+  margin: 0.2rem 0 0;
+  color: #8d5a14;
+  font-weight: 700;
+}
+
+.review-text {
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+
+.related-book-grid {
+  margin-top: 0.65rem;
 }
 
 .book-card-head {
@@ -986,6 +1071,14 @@ td {
   .modal-content {
     grid-template-columns: auto 1fr;
     align-items: start;
+  }
+
+  .book-detail-hero {
+    grid-template-columns: 220px 1fr;
+  }
+
+  .book-interaction-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

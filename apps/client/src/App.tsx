@@ -74,6 +74,47 @@ type UpdateContactResponse = {
   data: User;
 };
 
+type UiLogEntry = {
+  id: string;
+  text: string;
+  createdAt: string;
+};
+
+type BookReviewEntry = {
+  id: string;
+  rating: number;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    name: string;
+  };
+};
+
+type BookDetailsResponse = {
+  data: {
+    book: Book;
+    relatedBooks: Book[];
+    reviews: BookReviewEntry[];
+    myReview: {
+      id: string;
+      rating: number;
+      content: string;
+      updatedAt: string;
+    } | null;
+    myNote: {
+      id: string;
+      content: string;
+      updatedAt: string;
+    } | null;
+    reviewSummary: {
+      count: number;
+      averageRating: number | null;
+    };
+  };
+};
+
 type ImportProvider = "auto" | "openlibrary" | "google";
 type ViewMode = "catalog" | "dashboard";
 
@@ -114,6 +155,15 @@ const truncateText = (value: string, maxLength = 100): string => {
     return value;
   }
   return `${value.slice(0, maxLength - 1).trimEnd()}...`;
+};
+
+const getBookIdFromPath = (): string | null => {
+  const match = window.location.pathname.match(/^\/books\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
+const isInteractiveTarget = (target: EventTarget | null): boolean => {
+  return target instanceof HTMLElement && Boolean(target.closest("button, a, input, select, textarea, label"));
 };
 
 const normalizeCoverUrl = (value: string): string => {
@@ -366,7 +416,6 @@ const GoogleSignInButton = ({
 const ProfileMenu = ({
   user,
   busy,
-  message,
   borrowedCount,
   onGoogleCredential,
   onLogout,
@@ -374,7 +423,6 @@ const ProfileMenu = ({
 }: {
   user: User | null;
   busy: boolean;
-  message: string;
   borrowedCount: number;
   onGoogleCredential: (credential: string) => Promise<void>;
   onLogout: () => void;
@@ -434,9 +482,6 @@ const ProfileMenu = ({
               <p className="muted">Browse books now. Sign in to borrow.</p>
               <GoogleSignInButton onGoogleCredential={onGoogleCredential} targetId="google-signin-profile" width={205} />
               {busy && <p className="profile-status muted">Signing in...</p>}
-              <p className="profile-status notice" aria-live="polite">
-                {message}
-              </p>
             </>
           ) : (
             <>
@@ -525,6 +570,18 @@ const App = () => {
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookForm, setBookForm] = useState(emptyBookForm);
   const [submittingBook, setSubmittingBook] = useState(false);
+  const [activeBookId, setActiveBookId] = useState<string | null>(() => getBookIdFromPath());
+  const [bookDetails, setBookDetails] = useState<BookDetailsResponse["data"] | null>(null);
+  const [bookDetailsLoading, setBookDetailsLoading] = useState(false);
+  const [reviewDraft, setReviewDraft] = useState({
+    rating: "5",
+    content: ""
+  });
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingReview, setSavingReview] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState("");
+  const [adminLogs, setAdminLogs] = useState<UiLogEntry[]>([]);
 
   const tokenRef = useRef<string | null>(accessToken);
 
@@ -537,6 +594,24 @@ const App = () => {
     }
   }, [accessToken]);
 
+  useEffect(() => {
+    const text = message.trim();
+    if (!text) {
+      return;
+    }
+    setAdminLogs((current) => {
+      if (current[0]?.text === text) {
+        return current;
+      }
+      const entry: UiLogEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        text,
+        createdAt: new Date().toISOString()
+      };
+      return [entry, ...current].slice(0, 120);
+    });
+  }, [message]);
+
   const refreshAccessToken = useCallback(async (): Promise<string> => {
     const result = await requestJson<{ accessToken: string }>("/auth/refresh", {
       method: "POST"
@@ -546,7 +621,7 @@ const App = () => {
   }, []);
 
   const authRequest = useCallback(
-    async <TResponse,>(path: string, options: { method?: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown } = {}) => {
+    async <TResponse,>(path: string, options: { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: unknown } = {}) => {
       try {
         return await requestJson<TResponse>(path, {
           ...options,
@@ -829,6 +904,11 @@ const App = () => {
       setShowDueSoonDetails(false);
       setShouldLoadRecommendations(false);
       setRecommendations([]);
+      setActiveBookId(null);
+      setBookDetails(null);
+      if (window.location.pathname !== "/") {
+        window.history.pushState({}, "", "/");
+      }
       setMessage("Signed out.");
     }
   }, []);
@@ -870,13 +950,160 @@ const App = () => {
   }, [activeLoans, myActiveLoans, user]);
   const dueSoonCount = dueSoonLoans.length;
 
+  const openBookDetails = useCallback((bookId: string) => {
+    if (window.location.pathname !== `/books/${bookId}`) {
+      window.history.pushState({}, "", `/books/${bookId}`);
+    }
+    setActiveBookId(bookId);
+    setPreviewBook(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  const closeBookDetails = useCallback(() => {
+    if (window.location.pathname !== "/") {
+      window.history.pushState({}, "", "/");
+    }
+    setActiveBookId(null);
+    setBookDetails(null);
+    setShareFeedback("");
+  }, []);
+
+  const loadBookDetails = useCallback(
+    async (bookId: string) => {
+      setBookDetailsLoading(true);
+      try {
+        const result = await authRequest<BookDetailsResponse>(`/books/${bookId}/details`);
+        setBookDetails(result.data);
+        setReviewDraft({
+          rating: result.data.myReview?.rating ? String(result.data.myReview.rating) : "5",
+          content: result.data.myReview?.content ?? ""
+        });
+        setNoteDraft(result.data.myNote?.content ?? "");
+      } catch (error) {
+        setBookDetails(null);
+        setMessage(parseApiError(error));
+      } finally {
+        setBookDetailsLoading(false);
+      }
+    },
+    [authRequest]
+  );
+
+  useEffect(() => {
+    const onPopState = () => {
+      const pathBookId = getBookIdFromPath();
+      setActiveBookId(pathBookId);
+      if (!pathBookId) {
+        setBookDetails(null);
+        setShareFeedback("");
+      }
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!activeBookId) {
+      return;
+    }
+    void loadBookDetails(activeBookId);
+  }, [activeBookId, loadBookDetails]);
+
+  const shareCurrentBook = useCallback(async () => {
+    if (!bookDetails) {
+      return;
+    }
+    const shareUrl = `${window.location.origin}/books/${bookDetails.book.id}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${bookDetails.book.title} | MLMS`,
+          text: `Check this book: ${bookDetails.book.title} by ${bookDetails.book.author}`,
+          url: shareUrl
+        });
+        setShareFeedback("Shared.");
+        return;
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      setShareFeedback("Link copied.");
+    } catch {
+      setShareFeedback("Could not share right now.");
+    }
+  }, [bookDetails]);
+
+  const saveBookReview = useCallback(async () => {
+    if (!activeBookId) {
+      return;
+    }
+    if (!user) {
+      setMessage("Sign in with Google to write a review.");
+      return;
+    }
+    try {
+      const rating = Number(reviewDraft.rating);
+      if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+        setMessage("Rating must be between 1 and 5.");
+        return;
+      }
+      if (!reviewDraft.content.trim()) {
+        setMessage("Review content is required.");
+        return;
+      }
+      setSavingReview(true);
+      await authRequest(`/books/${activeBookId}/review`, {
+        method: "PUT",
+        body: {
+          rating,
+          content: reviewDraft.content.trim()
+        }
+      });
+      setMessage("Review saved.");
+      await loadBookDetails(activeBookId);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setSavingReview(false);
+    }
+  }, [activeBookId, authRequest, loadBookDetails, reviewDraft.content, reviewDraft.rating, user]);
+
+  const saveBookNote = useCallback(async () => {
+    if (!activeBookId) {
+      return;
+    }
+    if (!user) {
+      setMessage("Sign in with Google to save private notes.");
+      return;
+    }
+    try {
+      if (!noteDraft.trim()) {
+        setMessage("Note content is required.");
+        return;
+      }
+      setSavingNote(true);
+      await authRequest(`/books/${activeBookId}/note`, {
+        method: "PUT",
+        body: {
+          content: noteDraft.trim()
+        }
+      });
+      setMessage("Note saved.");
+      await loadBookDetails(activeBookId);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setSavingNote(false);
+    }
+  }, [activeBookId, authRequest, loadBookDetails, noteDraft, user]);
+
   const openUserDashboard = useCallback(() => {
     if (!user) {
       return;
     }
+    closeBookDetails();
     setViewMode("dashboard");
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [user]);
+  }, [closeBookDetails, user]);
 
   const scrollToRecommendations = useCallback(() => {
     setShouldLoadRecommendations(true);
@@ -1207,7 +1434,6 @@ const App = () => {
         <ProfileMenu
           user={user}
           busy={signingIn}
-          message={message}
           borrowedCount={myActiveLoans.length}
           onGoogleCredential={loginWithGoogleCredential}
           onLogout={logout}
@@ -1216,17 +1442,228 @@ const App = () => {
       </header>
 
       <main id="main-content" className="page">
-        {user && message && !message.startsWith("Signed in as ") && (
-          <p className="notice" aria-live="polite">
-            {message}
-          </p>
-        )}
+        {activeBookId ? (
+          <section className="panel book-detail-page" aria-labelledby="book-detail-title">
+            <div className="panel-head book-detail-head">
+              <button
+                className="btn btn-outline"
+                type="button"
+                onClick={() => {
+                  closeBookDetails();
+                  setViewMode("catalog");
+                }}
+              >
+                Back to Home
+              </button>
+            </div>
 
+            {bookDetailsLoading && <p className="muted">Loading book details...</p>}
+            {!bookDetailsLoading && !bookDetails && (
+              <p className="muted">Book details could not be loaded. Go back to Home and try again.</p>
+            )}
+
+            {!bookDetailsLoading && bookDetails && (
+              <>
+                <section className="book-detail-hero">
+                  <BookCover book={bookDetails.book} className="book-cover-large" />
+                  <div className="book-detail-summary">
+                    <div className="title-row">
+                      <h2 id="book-detail-title">{bookDetails.book.title}</h2>
+                      <AiMetadataBadge book={bookDetails.book} />
+                    </div>
+                    <p className="muted detail-author">{bookDetails.book.author}</p>
+                    <BookRating book={bookDetails.book} />
+                    <p className="muted">
+                      Community rating:{" "}
+                      {bookDetails.reviewSummary.averageRating !== null
+                        ? `${bookDetails.reviewSummary.averageRating.toFixed(1)} (${bookDetails.reviewSummary.count})`
+                        : "No community reviews yet"}
+                    </p>
+                    <p className={`status-pill ${bookDetails.book.available ? "available" : "unavailable"}`}>
+                      {bookDetails.book.available ? "Checked in (returned)" : "Checked out (borrowed)"}
+                    </p>
+                    <p className="book-detail-description">
+                      {bookDetails.book.description ?? "No summary available for this book yet."}
+                    </p>
+                    <div className="book-detail-meta">
+                      <p>
+                        <strong>Genre:</strong> {bookDetails.book.genre ?? "Uncategorized"}
+                      </p>
+                      <p>
+                        <strong>Published:</strong> {bookDetails.book.publishedYear ?? "Unknown"}
+                      </p>
+                      <p>
+                        <strong>ISBN:</strong> {bookDetails.book.isbn ?? "N/A"}
+                      </p>
+                    </div>
+                    <div className="row-actions">
+                      <button className="btn btn-outline" type="button" onClick={() => void shareCurrentBook()}>
+                        Share link
+                      </button>
+                      {bookDetails.book.available ? (
+                        (() => {
+                          const isPending = checkoutPendingIds.includes(bookDetails.book.id);
+                          return (
+                            <button
+                              className={`btn${isPending ? " is-loading" : ""}`}
+                              type="button"
+                              onClick={() => void checkoutBook(bookDetails.book.id)}
+                              disabled={!canBorrow || isPending}
+                              aria-busy={isPending}
+                              aria-label={isPending ? "Borrowing in progress" : canBorrow ? "Borrow" : "Sign in"}
+                            >
+                              {canBorrow ? "Borrow" : "Sign in"}
+                            </button>
+                          );
+                        })()
+                      ) : (
+                        <span className="muted">This book is currently checked out (borrowed).</span>
+                      )}
+                      {shareFeedback && <p className="muted">{shareFeedback}</p>}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="book-interaction-grid" aria-label="Book interactions">
+                  <article className="panel">
+                    <h3>My private note</h3>
+                    {!user && <p className="muted">Sign in to save personal notes.</p>}
+                    {user && (
+                      <>
+                        <p className="muted">Saved under your account ({user.email}).</p>
+                        <textarea
+                          rows={6}
+                          maxLength={3000}
+                          value={noteDraft}
+                          onChange={(event) => setNoteDraft(event.target.value)}
+                          placeholder="Write your personal note for this book..."
+                        />
+                        <div className="row-actions">
+                          <button className="btn" type="button" onClick={() => void saveBookNote()} disabled={savingNote}>
+                            {savingNote ? "Saving..." : "Save note"}
+                          </button>
+                        </div>
+
+                        <h3>Your review</h3>
+                        <div className="review-editor">
+                          <label>
+                            Your rating
+                            <select
+                              value={reviewDraft.rating}
+                              onChange={(event) =>
+                                setReviewDraft((current) => ({ ...current, rating: event.target.value }))
+                              }
+                            >
+                              <option value="5">5</option>
+                              <option value="4">4</option>
+                              <option value="3">3</option>
+                              <option value="2">2</option>
+                              <option value="1">1</option>
+                            </select>
+                          </label>
+                          <label>
+                            Your review
+                            <textarea
+                              rows={4}
+                              maxLength={1500}
+                              value={reviewDraft.content}
+                              onChange={(event) =>
+                                setReviewDraft((current) => ({ ...current, content: event.target.value }))
+                              }
+                              placeholder="Write your review..."
+                            />
+                          </label>
+                          <div className="row-actions">
+                            <button className="btn" type="button" onClick={() => void saveBookReview()} disabled={savingReview}>
+                              {savingReview ? "Saving..." : "Save review"}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </article>
+
+                  <article className="panel">
+                    <h3>Reviews</h3>
+                    <p className="muted">All member reviews with rating and review text.</p>
+
+                    <ul className="stack-list reviews-list">
+                      {bookDetails.reviews.length === 0 && <li className="muted">No reviews yet.</li>}
+                      {bookDetails.reviews.map((review) => (
+                        <li key={review.id} className="row-item review-item">
+                          <div>
+                            <p className="review-head">
+                              <strong>{review.user.name}</strong>
+                            </p>
+                            <p className="review-rating-line">{`Rating: ${review.rating}/5`}</p>
+                            <p className="review-text">{review.content}</p>
+                            <p className="muted">Updated {new Date(review.updatedAt).toLocaleDateString()}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                </section>
+
+                <section className="panel" aria-labelledby="related-books-title">
+                  <div className="panel-head">
+                    <h3 id="related-books-title">Suggested books by author or genre</h3>
+                  </div>
+                  <div className="book-grid related-book-grid">
+                    {bookDetails.relatedBooks.length === 0 && (
+                      <p className="muted">No related books found yet.</p>
+                    )}
+                    {bookDetails.relatedBooks.map((relatedBook) => (
+                      <article
+                        key={relatedBook.id}
+                        className="book-card storefront-book-card clickable-card"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open details for ${relatedBook.title}`}
+                        onClick={(event) => {
+                          if (isInteractiveTarget(event.target)) {
+                            return;
+                          }
+                          openBookDetails(relatedBook.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (isInteractiveTarget(event.target)) {
+                            return;
+                          }
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openBookDetails(relatedBook.id);
+                          }
+                        }}
+                      >
+                        <div className="book-card-head storefront-book-head">
+                          <BookCover book={relatedBook} className="book-cover-thumb" />
+                          <header>
+                            <h3 className="book-title" title={relatedBook.title}>
+                              {truncateText(relatedBook.title, 90)}
+                            </h3>
+                            <p className="muted">{relatedBook.author}</p>
+                            <BookRating book={relatedBook} />
+                          </header>
+                        </div>
+                        <p className={`status-pill ${relatedBook.available ? "available" : "unavailable"}`}>
+                          {relatedBook.available ? "Checked in (returned)" : "Checked out (borrowed)"}
+                        </p>
+                        <p className="book-genre">{truncateText(relatedBook.genre ?? "Uncategorized", 80)}</p>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </>
+            )}
+          </section>
+        ) : (
+          <>
         {viewMode === "dashboard" && user && (
           <section className="panel dashboard-nav" aria-label="Dashboard navigation">
             <p className="muted">Dashboard view includes your loans and management tools.</p>
             <button className="btn btn-outline dashboard-back-btn" type="button" onClick={() => setViewMode("catalog")}>
-              Back to catalog
+              Back to Home
             </button>
           </section>
         )}
@@ -1499,7 +1936,28 @@ const App = () => {
 
                   <div className="book-grid storefront-grid">
                     {books.map((book) => (
-                      <article className="book-card storefront-book-card" key={book.id}>
+                      <article
+                        className="book-card storefront-book-card clickable-card"
+                        key={book.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open details for ${book.title}`}
+                        onClick={(event) => {
+                          if (isInteractiveTarget(event.target)) {
+                            return;
+                          }
+                          openBookDetails(book.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (isInteractiveTarget(event.target)) {
+                            return;
+                          }
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openBookDetails(book.id);
+                          }
+                        }}
+                      >
                         <div className="book-card-head storefront-book-head">
                           <BookCover book={book} className="book-cover-thumb" />
                           <header>
@@ -1582,7 +2040,28 @@ const App = () => {
                   <div className="recommendation-shelf" role="list">
                     {shouldLoadRecommendations && recommendations.length === 0 && <p className="muted">No recommendations yet.</p>}
                     {recommendations.map((book) => (
-                      <article key={book.id} className="shelf-card" role="listitem">
+                      <article
+                        key={book.id}
+                        className="shelf-card clickable-card"
+                        role="listitem"
+                        tabIndex={0}
+                        aria-label={`Open details for ${book.title}`}
+                        onClick={(event) => {
+                          if (isInteractiveTarget(event.target)) {
+                            return;
+                          }
+                          openBookDetails(book.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (isInteractiveTarget(event.target)) {
+                            return;
+                          }
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openBookDetails(book.id);
+                          }
+                        }}
+                      >
                         <BookCover book={book} className="book-cover-thumb shelf-cover" />
                         <div className="title-row">
                           <h3 className="shelf-title" title={book.title}>
@@ -1727,6 +2206,25 @@ const App = () => {
         )}
 
         {viewMode === "dashboard" && user?.role === "ADMIN" && (
+          <section className="panel" aria-labelledby="admin-activity-logs-title">
+            <div className="panel-head">
+              <h2 id="admin-activity-logs-title">Activity logs</h2>
+            </div>
+            <ul className="stack-list">
+              {adminLogs.length === 0 && <li className="muted">No activity logs yet.</li>}
+              {adminLogs.map((entry) => (
+                <li key={entry.id} className="row-item">
+                  <div>
+                    <p>{entry.text}</p>
+                    <p className="muted">{new Date(entry.createdAt).toLocaleString()}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {viewMode === "dashboard" && user?.role === "ADMIN" && (
           <section className="panel" aria-labelledby="borrowers-overview-title">
             <div className="panel-head">
               <h2 id="borrowers-overview-title">Borrowers and due alerts</h2>
@@ -1833,6 +2331,8 @@ const App = () => {
               </table>
             </div>
           </section>
+        )}
+          </>
         )}
       </main>
       <BookPreviewDialog book={previewBook} onClose={() => setPreviewBook(null)} onCheckout={checkoutBook} />

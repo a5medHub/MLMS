@@ -11,7 +11,7 @@ import {
   searchExternalBooks
 } from "../lib/external-books";
 import { FALLBACK_BOOKS } from "../lib/fallback-books";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { optionalAuth, requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
 const BOOKS_CACHE_TTL_MS = 20_000;
@@ -152,6 +152,168 @@ const bookInputSchema = z.object({
   averageRating: z.coerce.number().min(0).max(5).optional().nullable(),
   ratingsCount: z.coerce.number().int().min(0).optional().nullable()
 });
+
+const reviewInputSchema = z.object({
+  rating: z.coerce.number().int().min(1).max(5),
+  content: z.string().trim().min(3).max(1500)
+});
+
+const noteInputSchema = z.object({
+  content: z.string().trim().min(1).max(3000)
+});
+
+const isMissingTableError = (error: unknown): boolean => {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2021"
+  );
+};
+
+const findBookById = async (bookId: string) => {
+  try {
+    const book = await prisma.book.findUnique({ where: { id: bookId } });
+    return book ? normalizeBookRecord(book) : null;
+  } catch (error) {
+    if (!isMissingColumnError(error)) {
+      throw error;
+    }
+    const legacyBook = await prisma.book.findUnique({
+      where: { id: bookId },
+      select: {
+        id: true,
+        title: true,
+        author: true,
+        isbn: true,
+        genre: true,
+        publishedYear: true,
+        description: true,
+        coverUrl: true,
+        available: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+    if (!legacyBook) {
+      return null;
+    }
+    return normalizeBookRecord({
+      ...legacyBook,
+      averageRating: null,
+      ratingsCount: null,
+      aiMetadata: false
+    });
+  }
+};
+
+const findRelatedBooks = async (
+  book: Awaited<ReturnType<typeof findBookById>>,
+  limit: number
+): Promise<Array<ReturnType<typeof normalizeBookRecord>>> => {
+  if (!book) {
+    return [];
+  }
+  const boundedLimit = Math.max(1, Math.min(12, limit));
+  const relatedOrConditions: Array<Record<string, unknown>> = [
+    { author: { equals: book.author, mode: "insensitive" as const } }
+  ];
+  if (book.genre) {
+    relatedOrConditions.push({ genre: { equals: book.genre, mode: "insensitive" as const } });
+  }
+
+  const runRelatedQuery = async (where: Record<string, unknown>, take: number) => {
+    try {
+      const records = await prisma.book.findMany({
+        where,
+        orderBy: [{ available: "desc" }, { averageRating: "desc" }, { ratingsCount: "desc" }, { createdAt: "desc" }],
+        take
+      });
+      return records.map((record) => normalizeBookRecord(record));
+    } catch (error) {
+      if (!isMissingColumnError(error)) {
+        throw error;
+      }
+      const records = await prisma.book.findMany({
+        where,
+        orderBy: [{ available: "desc" }, { createdAt: "desc" }],
+        take,
+        select: {
+          id: true,
+          title: true,
+          author: true,
+          isbn: true,
+          genre: true,
+          publishedYear: true,
+          description: true,
+          coverUrl: true,
+          available: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
+      return records.map((record) =>
+        normalizeBookRecord({
+          ...record,
+          averageRating: null,
+          ratingsCount: null,
+          aiMetadata: false
+        })
+      );
+    }
+  };
+
+  const strictMatches = await runRelatedQuery(
+    {
+      id: { not: book.id },
+      OR: relatedOrConditions
+    },
+    boundedLimit
+  );
+  if (strictMatches.length >= boundedLimit) {
+    return strictMatches;
+  }
+
+  const authorToken = book.author
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3)
+    .slice(-1)[0];
+
+  const relaxedOrConditions: Array<Record<string, unknown>> = [];
+  if (book.genre) {
+    relaxedOrConditions.push({ genre: { contains: book.genre, mode: "insensitive" as const } });
+  }
+  if (authorToken) {
+    relaxedOrConditions.push({ author: { contains: authorToken, mode: "insensitive" as const } });
+  }
+
+  const excludedIds = [book.id, ...strictMatches.map((item) => item.id)];
+  const relaxedMatches =
+    relaxedOrConditions.length > 0
+      ? await runRelatedQuery(
+          {
+            id: { notIn: excludedIds },
+            OR: relaxedOrConditions
+          },
+          boundedLimit - strictMatches.length
+        )
+      : [];
+
+  const combined = [...strictMatches, ...relaxedMatches];
+  if (combined.length >= boundedLimit) {
+    return combined.slice(0, boundedLimit);
+  }
+
+  const fillMatches = await runRelatedQuery(
+    {
+      id: { notIn: [book.id, ...combined.map((item) => item.id)] }
+    },
+    boundedLimit - combined.length
+  );
+
+  return [...combined, ...fillMatches].slice(0, boundedLimit);
+};
 
 router.get(
   "/",
@@ -440,41 +602,237 @@ router.post(
 );
 
 router.get(
+  "/:bookId/details",
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const params = z.object({ bookId: z.string().min(1) }).parse(req.params);
+    const query = z
+      .object({
+        relatedLimit: z.coerce.number().int().min(1).max(12).default(8),
+        reviewLimit: z.coerce.number().int().min(1).max(40).default(20)
+      })
+      .parse(req.query);
+
+    const book = await findBookById(params.bookId);
+    if (!book) {
+      throw new HttpError(404, "Book not found");
+    }
+
+    const relatedBooks = await findRelatedBooks(book, query.relatedLimit);
+
+    let reviews: Array<{
+      id: string;
+      rating: number;
+      content: string;
+      createdAt: Date;
+      updatedAt: Date;
+      user: { id: string; name: string };
+    }> = [];
+    let myReview: { id: string; rating: number; content: string; updatedAt: Date } | null = null;
+    let myNote: { id: string; content: string; updatedAt: Date } | null = null;
+
+    try {
+      reviews = await prisma.bookReview.findMany({
+        where: { bookId: params.bookId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: query.reviewLimit
+      });
+
+      if (req.user) {
+        const [review, note] = await Promise.all([
+          prisma.bookReview.findUnique({
+            where: {
+              bookId_userId: {
+                bookId: params.bookId,
+                userId: req.user.id
+              }
+            },
+            select: {
+              id: true,
+              rating: true,
+              content: true,
+              updatedAt: true
+            }
+          }),
+          prisma.bookNote.findUnique({
+            where: {
+              bookId_userId: {
+                bookId: params.bookId,
+                userId: req.user.id
+              }
+            },
+            select: {
+              id: true,
+              content: true,
+              updatedAt: true
+            }
+          })
+        ]);
+        myReview = review;
+        myNote = note;
+      }
+    } catch (error) {
+      if (!isMissingTableError(error)) {
+        throw error;
+      }
+    }
+
+    const reviewSummary = reviews.reduce(
+      (acc, review) => {
+        acc.count += 1;
+        acc.total += review.rating;
+        return acc;
+      },
+      { count: 0, total: 0 }
+    );
+
+    res.status(200).json({
+      data: {
+        book,
+        relatedBooks,
+        reviews,
+        myReview,
+        myNote,
+        reviewSummary: {
+          count: reviewSummary.count,
+          averageRating:
+            reviewSummary.count > 0 ? Number((reviewSummary.total / reviewSummary.count).toFixed(2)) : null
+        }
+      }
+    });
+  })
+);
+
+router.put(
+  "/:bookId/review",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const params = z.object({ bookId: z.string().min(1) }).parse(req.params);
+    const payload = reviewInputSchema.parse(req.body);
+
+    const viewer = req.user;
+    if (!viewer) {
+      throw new HttpError(401, "Authentication required");
+    }
+
+    const book = await findBookById(params.bookId);
+    if (!book) {
+      throw new HttpError(404, "Book not found");
+    }
+
+    try {
+      const saved = await prisma.bookReview.upsert({
+        where: {
+          bookId_userId: {
+            bookId: params.bookId,
+            userId: viewer.id
+          }
+        },
+        update: {
+          rating: payload.rating,
+          content: payload.content
+        },
+        create: {
+          bookId: params.bookId,
+          userId: viewer.id,
+          rating: payload.rating,
+          content: payload.content
+        }
+      });
+
+      await createAuditLog({
+        actorUserId: viewer.id,
+        action: "BOOK_REVIEW_SAVED",
+        entity: "BOOK_REVIEW",
+        entityId: saved.id,
+        metadata: {
+          bookId: params.bookId,
+          rating: payload.rating
+        }
+      });
+
+      res.status(200).json({
+        data: saved
+      });
+    } catch (error) {
+      if (isMissingTableError(error)) {
+        throw new HttpError(503, "Book reviews are not initialized yet. Run database sync.");
+      }
+      throw error;
+    }
+  })
+);
+
+router.put(
+  "/:bookId/note",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const params = z.object({ bookId: z.string().min(1) }).parse(req.params);
+    const payload = noteInputSchema.parse(req.body);
+
+    const viewer = req.user;
+    if (!viewer) {
+      throw new HttpError(401, "Authentication required");
+    }
+
+    const book = await findBookById(params.bookId);
+    if (!book) {
+      throw new HttpError(404, "Book not found");
+    }
+
+    try {
+      const saved = await prisma.bookNote.upsert({
+        where: {
+          bookId_userId: {
+            bookId: params.bookId,
+            userId: viewer.id
+          }
+        },
+        update: {
+          content: payload.content
+        },
+        create: {
+          bookId: params.bookId,
+          userId: viewer.id,
+          content: payload.content
+        }
+      });
+
+      await createAuditLog({
+        actorUserId: viewer.id,
+        action: "BOOK_NOTE_SAVED",
+        entity: "BOOK_NOTE",
+        entityId: saved.id,
+        metadata: {
+          bookId: params.bookId
+        }
+      });
+
+      res.status(200).json({
+        data: saved
+      });
+    } catch (error) {
+      if (isMissingTableError(error)) {
+        throw new HttpError(503, "Book notes are not initialized yet. Run database sync.");
+      }
+      throw error;
+    }
+  })
+);
+
+router.get(
   "/:bookId",
   asyncHandler(async (req, res) => {
     const params = z.object({ bookId: z.string().min(1) }).parse(req.params);
-    let book: Awaited<ReturnType<typeof prisma.book.findUnique>>;
-    try {
-      book = await prisma.book.findUnique({ where: { id: params.bookId } });
-    } catch (error) {
-      if (!isMissingColumnError(error)) {
-        throw error;
-      }
-      const legacyBook = await prisma.book.findUnique({
-        where: { id: params.bookId },
-        select: {
-          id: true,
-          title: true,
-          author: true,
-          isbn: true,
-          genre: true,
-          publishedYear: true,
-          description: true,
-          coverUrl: true,
-          available: true,
-          createdAt: true,
-          updatedAt: true
-        }
-      });
-      book = legacyBook
-        ? ({
-            ...legacyBook,
-            averageRating: null,
-            ratingsCount: null,
-            aiMetadata: false
-          } as typeof book)
-        : null;
-    }
+    const book = await findBookById(params.bookId);
     if (!book) {
       throw new HttpError(404, "Book not found");
     }
