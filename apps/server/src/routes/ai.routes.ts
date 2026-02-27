@@ -24,6 +24,7 @@ type RecommendationsPayload = {
     aiMetadata: boolean;
     available: boolean;
     requestPending: boolean;
+    isFavorite: boolean;
     createdAt: Date | string;
     updatedAt?: Date | string;
     recommendationScore: number;
@@ -31,6 +32,8 @@ type RecommendationsPayload = {
   meta: {
     strategy: string;
     sourceLoans: number;
+    sourceFavorites: number;
+    sourcePositiveReviews: number;
   };
 };
 
@@ -86,28 +89,73 @@ router.post(
       })
       .parse(req.body ?? {});
     const viewer = req.user;
-    const history = viewer
-      ? await prisma.loan.findMany({
-          where: { userId: viewer.id },
-          select: {
-            id: true,
-            bookId: true,
-            checkedOutAt: true,
-            book: {
-              select: {
-                id: true,
-                title: true,
-                author: true,
-                genre: true
+    const [history, favorites, positiveReviews] = viewer
+      ? await Promise.all([
+          prisma.loan.findMany({
+            where: { userId: viewer.id },
+            select: {
+              id: true,
+              bookId: true,
+              checkedOutAt: true,
+              book: {
+                select: {
+                  id: true,
+                  title: true,
+                  author: true,
+                  genre: true
+                }
               }
-            }
-          },
-          orderBy: { checkedOutAt: "desc" },
-          take: 40
-        })
-      : [];
+            },
+            orderBy: { checkedOutAt: "desc" },
+            take: 40
+          }),
+          prisma.bookFavorite.findMany({
+            where: { userId: viewer.id },
+            select: {
+              bookId: true,
+              updatedAt: true,
+              book: {
+                select: {
+                  id: true,
+                  author: true,
+                  genre: true
+                }
+              }
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 50
+          }),
+          prisma.bookReview.findMany({
+            where: {
+              userId: viewer.id,
+              rating: {
+                gte: 3
+              }
+            },
+            select: {
+              bookId: true,
+              rating: true,
+              updatedAt: true,
+              book: {
+                select: {
+                  id: true,
+                  author: true,
+                  genre: true
+                }
+              }
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 50
+          })
+        ])
+      : [[], [], []];
 
-    const cacheKey = `${viewer?.id ?? "guest"}:${payload.limit}:${history.length}`;
+    const latestHistoryAt = history[0]?.checkedOutAt ? new Date(history[0].checkedOutAt).toISOString() : "";
+    const latestFavoriteAt = favorites[0]?.updatedAt ? new Date(favorites[0].updatedAt).toISOString() : "";
+    const latestPositiveReviewAt = positiveReviews[0]?.updatedAt
+      ? new Date(positiveReviews[0].updatedAt).toISOString()
+      : "";
+    const cacheKey = `${viewer?.id ?? "guest"}:${payload.limit}:${history.length}:${favorites.length}:${positiveReviews.length}:${latestHistoryAt}:${latestFavoriteAt}:${latestPositiveReviewAt}`;
     const cached = recommendationsCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       res.status(200).json(cached.payload);
@@ -116,11 +164,12 @@ router.post(
 
     const genreWeights = new Map<string, number>();
     const authorWeights = new Map<string, number>();
-    const borrowedBookIds = new Set<string>();
+    const seedBookIds = new Set<string>();
+    const favoriteBookIds = new Set<string>(favorites.map((item) => item.bookId));
 
     history.forEach((loan, index) => {
       const recencyWeight = Math.max(1, 5 - Math.floor(index / 8));
-      borrowedBookIds.add(loan.bookId);
+      seedBookIds.add(loan.bookId);
 
       if (loan.book.genre) {
         genreWeights.set(loan.book.genre, (genreWeights.get(loan.book.genre) ?? 0) + recencyWeight);
@@ -128,12 +177,40 @@ router.post(
       authorWeights.set(loan.book.author, (authorWeights.get(loan.book.author) ?? 0) + recencyWeight);
     });
 
+    favorites.forEach((favorite, index) => {
+      const recencyWeight = Math.max(2, 7 - Math.floor(index / 10));
+      seedBookIds.add(favorite.bookId);
+      if (favorite.book.genre) {
+        genreWeights.set(favorite.book.genre, (genreWeights.get(favorite.book.genre) ?? 0) + recencyWeight * 1.2);
+      }
+      authorWeights.set(
+        favorite.book.author,
+        (authorWeights.get(favorite.book.author) ?? 0) + recencyWeight * 1.5
+      );
+    });
+
+    positiveReviews.forEach((review, index) => {
+      const recencyWeight = Math.max(1, 6 - Math.floor(index / 10));
+      const ratingWeight = Math.max(3, review.rating);
+      seedBookIds.add(review.bookId);
+      if (review.book.genre) {
+        genreWeights.set(
+          review.book.genre,
+          (genreWeights.get(review.book.genre) ?? 0) + recencyWeight * ratingWeight * 0.55
+        );
+      }
+      authorWeights.set(
+        review.book.author,
+        (authorWeights.get(review.book.author) ?? 0) + recencyWeight * ratingWeight * 0.75
+      );
+    });
+
     const runPrimaryCandidatesQuery = async () => {
       return prisma.book.findMany({
         where: {
           available: true,
           requestPending: false,
-          ...(borrowedBookIds.size > 0 ? { id: { notIn: [...borrowedBookIds] } } : {})
+          ...(seedBookIds.size > 0 ? { id: { notIn: [...seedBookIds] } } : {})
         },
         take: 200
       });
@@ -143,7 +220,7 @@ router.post(
       const legacy = await prisma.book.findMany({
         where: {
           available: true,
-          ...(borrowedBookIds.size > 0 ? { id: { notIn: [...borrowedBookIds] } } : {})
+          ...(seedBookIds.size > 0 ? { id: { notIn: [...seedBookIds] } } : {})
         },
         take: 200,
         select: {
@@ -179,11 +256,14 @@ router.post(
         const fallbackPayload: RecommendationsPayload = {
           data: FALLBACK_BOOKS.slice(0, payload.limit).map((book, index) => ({
             ...book,
+            isFavorite: false,
             recommendationScore: Number((1 - index * 0.01).toFixed(2))
           })),
           meta: {
             strategy: "fallback-curated-list",
-            sourceLoans: history.length
+            sourceLoans: history.length,
+            sourceFavorites: favorites.length,
+            sourcePositiveReviews: positiveReviews.length
           }
         };
         res.status(200).json(fallbackPayload);
@@ -195,13 +275,14 @@ router.post(
       .map((book) => {
         const genreScore = book.genre ? genreWeights.get(book.genre) ?? 0 : 0;
         const authorScore = authorWeights.get(book.author) ?? 0;
-        const noveltyBonus = history.length === 0 ? 2 : 0;
+        const noveltyBonus = history.length === 0 && favorites.length === 0 && positiveReviews.length === 0 ? 2 : 0;
         const ratingBoost = (book.averageRating ?? 0) * 1.5;
         const ratingVolumeBoost = Math.min(2, Math.log10((book.ratingsCount ?? 0) + 1));
         const availabilityBoost = book.available ? 1 : 0;
         const score = genreScore * 1.2 + authorScore * 1.4 + noveltyBonus + ratingBoost + ratingVolumeBoost + availabilityBoost;
         return {
           ...book,
+          isFavorite: favoriteBookIds.has(book.id),
           recommendationScore: Number(score.toFixed(2))
         };
       })
@@ -212,10 +293,12 @@ router.post(
       data: scored,
       meta: {
         strategy:
-          history.length > 0
-            ? "history-weighted genre/author affinity with rating boost"
+          history.length > 0 || favorites.length > 0 || positiveReviews.length > 0
+            ? "history + favorites + ratings>=3 weighted genre/author affinity with rating boost"
             : "top-rated available books",
-        sourceLoans: history.length
+        sourceLoans: history.length,
+        sourceFavorites: favorites.length,
+        sourcePositiveReviews: positiveReviews.length
       }
     };
 

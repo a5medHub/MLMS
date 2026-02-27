@@ -32,6 +32,7 @@ type BooksPayload = {
     aiMetadata: boolean;
     available: boolean;
     requestPending: boolean;
+    isFavorite: boolean;
     createdAt: Date | string;
     updatedAt?: Date | string;
   }>;
@@ -106,6 +107,7 @@ const normalizeBookRecord = <
     ratingsCount?: number | null;
     aiMetadata?: boolean | null;
     requestPending?: boolean | null;
+    isFavorite?: boolean | null;
   }
 >(
   book: TBook
@@ -114,14 +116,52 @@ const normalizeBookRecord = <
   ratingsCount: number | null;
   aiMetadata: boolean;
   requestPending: boolean;
+  isFavorite: boolean;
 } => {
   return {
     ...book,
     averageRating: book.averageRating ?? null,
     ratingsCount: book.ratingsCount ?? null,
     aiMetadata: book.aiMetadata ?? false,
-    requestPending: book.requestPending ?? false
+    requestPending: book.requestPending ?? false,
+    isFavorite: book.isFavorite ?? false
   };
+};
+
+const applyFavoriteFlagsForViewer = async <
+  TBook extends {
+    id: string;
+  }
+>(
+  books: TBook[],
+  viewerId?: string
+): Promise<Array<TBook & { isFavorite: boolean }>> => {
+  if (!viewerId || books.length === 0) {
+    return books.map((book) => ({ ...book, isFavorite: false }));
+  }
+
+  let favorites: Array<{ bookId: string }> = [];
+  try {
+    favorites = await prisma.bookFavorite.findMany({
+      where: {
+        userId: viewerId,
+        bookId: { in: books.map((book) => book.id) }
+      },
+      select: {
+        bookId: true
+      }
+    });
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error;
+    }
+    return books.map((book) => ({ ...book, isFavorite: false }));
+  }
+  const favoriteIds = new Set(favorites.map((favorite) => favorite.bookId));
+  return books.map((book) => ({
+    ...book,
+    isFavorite: favoriteIds.has(book.id)
+  }));
 };
 
 const isMissingColumnError = (error: unknown): boolean => {
@@ -223,7 +263,7 @@ const findBookById = async (bookId: string) => {
 const findRelatedBooks = async (
   book: Awaited<ReturnType<typeof findBookById>>,
   limit: number
-): Promise<Array<ReturnType<typeof normalizeBookRecord>>> => {
+) => {
   if (!book) {
     return [];
   }
@@ -331,6 +371,7 @@ const findRelatedBooks = async (
 
 router.get(
   "/",
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const querySchema = z.object({
       q: z.string().optional(),
@@ -421,7 +462,7 @@ router.get(
       } else {
         const fallback = FALLBACK_BOOKS.slice(0, query.limit);
         res.status(200).json({
-          data: fallback,
+          data: fallback.map((book) => ({ ...book, isFavorite: false })),
           pageInfo: {
             hasNextPage: false,
             nextCursor: null
@@ -432,7 +473,8 @@ router.get(
     }
 
     const hasNextPage = books.length > query.limit;
-    const data = hasNextPage ? books.slice(0, query.limit) : books;
+    const pageData = hasNextPage ? books.slice(0, query.limit) : books;
+    const data = await applyFavoriteFlagsForViewer(pageData, req.user?.id);
     const nextCursor = hasNextPage ? data[data.length - 1]?.id : null;
 
     const payload: BooksPayload = {
@@ -443,8 +485,8 @@ router.get(
       }
     };
 
-    lastBooksPayload = payload;
     if (allowCache) {
+      lastBooksPayload = payload;
       booksCache.set(cacheKey, {
         expiresAt: Date.now() + BOOKS_CACHE_TTL_MS,
         payload
@@ -486,6 +528,47 @@ router.get(
           activeLoans: 0
         }
       });
+    }
+  })
+);
+
+router.get(
+  "/favorites",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const query = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(50).default(12)
+      })
+      .parse(req.query);
+
+    const viewer = req.user;
+    if (!viewer) {
+      throw new HttpError(401, "Authentication required");
+    }
+
+    try {
+      const favorites = await prisma.bookFavorite.findMany({
+        where: { userId: viewer.id },
+        include: {
+          book: true
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: query.limit
+      });
+
+      res.status(200).json({
+        data: favorites.map((favorite) => ({
+          ...normalizeBookRecord(favorite.book),
+          isFavorite: true
+        }))
+      });
+    } catch (error) {
+      if (isMissingTableError(error)) {
+        res.status(200).json({ data: [] });
+        return;
+      }
+      throw error;
     }
   })
 );
@@ -633,7 +716,8 @@ router.get(
       throw new HttpError(404, "Book not found");
     }
 
-    const relatedBooks = await findRelatedBooks(book, query.relatedLimit);
+    let relatedBooks = await findRelatedBooks(book, query.relatedLimit);
+    let isFavorite = false;
 
     let reviews: Array<{
       id: string;
@@ -694,11 +778,38 @@ router.get(
         ]);
         myReview = review;
         myNote = note;
+        try {
+          const favorite = await prisma.bookFavorite.findUnique({
+            where: {
+              bookId_userId: {
+                bookId: params.bookId,
+                userId: req.user.id
+              }
+            },
+            select: {
+              id: true
+            }
+          });
+          isFavorite = Boolean(favorite);
+        } catch (error) {
+          if (!isMissingTableError(error)) {
+            throw error;
+          }
+        }
       }
     } catch (error) {
       if (!isMissingTableError(error)) {
         throw error;
       }
+    }
+
+    try {
+      relatedBooks = await applyFavoriteFlagsForViewer(relatedBooks, req.user?.id);
+    } catch (error) {
+      if (!isMissingTableError(error)) {
+        throw error;
+      }
+      relatedBooks = relatedBooks.map((item) => ({ ...item, isFavorite: false }));
     }
 
     const reviewSummary = reviews.reduce(
@@ -712,7 +823,10 @@ router.get(
 
     res.status(200).json({
       data: {
-        book,
+        book: {
+          ...book,
+          isFavorite
+        },
         relatedBooks,
         reviews,
         myReview,
@@ -844,15 +958,108 @@ router.put(
   })
 );
 
+router.post(
+  "/:bookId/favorite/toggle",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const params = z.object({ bookId: z.string().min(1) }).parse(req.params);
+    const viewer = req.user;
+    if (!viewer) {
+      throw new HttpError(401, "Authentication required");
+    }
+
+    const book = await findBookById(params.bookId);
+    if (!book) {
+      throw new HttpError(404, "Book not found");
+    }
+
+    try {
+      const favorite = await prisma.bookFavorite.findUnique({
+        where: {
+          bookId_userId: {
+            bookId: params.bookId,
+            userId: viewer.id
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      const isFavorite = !favorite;
+      if (favorite) {
+        await prisma.bookFavorite.delete({
+          where: {
+            bookId_userId: {
+              bookId: params.bookId,
+              userId: viewer.id
+            }
+          }
+        });
+      } else {
+        await prisma.bookFavorite.create({
+          data: {
+            bookId: params.bookId,
+            userId: viewer.id
+          }
+        });
+      }
+
+      await createAuditLog({
+        actorUserId: viewer.id,
+        action: "BOOK_FAVORITE_TOGGLED",
+        entity: "BOOK_FAVORITE",
+        entityId: params.bookId,
+        metadata: {
+          bookId: params.bookId,
+          isFavorite
+        }
+      });
+
+      res.status(200).json({
+        data: {
+          bookId: params.bookId,
+          isFavorite
+        }
+      });
+    } catch (error) {
+      if (isMissingTableError(error)) {
+        throw new HttpError(503, "Favorites are not initialized yet. Run database sync.");
+      }
+      throw error;
+    }
+  })
+);
+
 router.get(
   "/:bookId",
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const params = z.object({ bookId: z.string().min(1) }).parse(req.params);
     const book = await findBookById(params.bookId);
     if (!book) {
       throw new HttpError(404, "Book not found");
     }
-    res.status(200).json({ data: book });
+    let isFavorite = false;
+    if (req.user) {
+      try {
+        const favorite = await prisma.bookFavorite.findUnique({
+          where: {
+            bookId_userId: {
+              bookId: params.bookId,
+              userId: req.user.id
+            }
+          },
+          select: { id: true }
+        });
+        isFavorite = Boolean(favorite);
+      } catch (error) {
+        if (!isMissingTableError(error)) {
+          throw error;
+        }
+      }
+    }
+    res.status(200).json({ data: { ...book, isFavorite } });
   })
 );
 

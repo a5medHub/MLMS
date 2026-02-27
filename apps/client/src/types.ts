@@ -28,6 +28,7 @@ export type Book = {
   aiMetadata: boolean;
   available: boolean;
   requestPending: boolean;
+  isFavorite: boolean;
   createdAt: string;
 };
 

@@ -143,7 +143,7 @@ type BookDetailsResponse = {
 };
 
 type ImportProvider = "auto" | "openlibrary" | "google";
-type ViewMode = "catalog" | "dashboard";
+type ViewMode = "catalog" | "dashboard" | "settings";
 type AvatarPreset = {
   id: string;
   label: string;
@@ -316,6 +316,13 @@ const getLevelInfo = (points: number) => {
   };
 };
 
+type FavoriteToggleResponse = {
+  data: {
+    bookId: string;
+    isFavorite: boolean;
+  };
+};
+
 const truncateText = (value: string, maxLength = 100): string => {
   if (value.length <= maxLength) {
     return value;
@@ -383,6 +390,34 @@ const AiMetadataBadge = ({ book }: { book: Book }) => {
     <span className="ai-badge" title="Metadata enhanced by AI" aria-label="AI metadata">
       AI
     </span>
+  );
+};
+
+const FavoriteStarButton = ({
+  bookId,
+  isFavorite,
+  isPending,
+  onToggle
+}: {
+  bookId: string;
+  isFavorite: boolean;
+  isPending: boolean;
+  onToggle: (bookId: string) => Promise<void>;
+}) => {
+  return (
+    <button
+      className={`favorite-star-btn ${isFavorite ? "active" : ""}`}
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        void onToggle(bookId);
+      }}
+      disabled={isPending}
+      aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+      title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+    >
+      {isPending ? "..." : isFavorite ? "★" : "☆"}
+    </button>
   );
 };
 
@@ -587,7 +622,8 @@ const ProfileMenu = ({
   memberUnreadRequestCount,
   onGoogleCredential,
   onLogout,
-  onOpenDashboard
+  onOpenDashboard,
+  onOpenSettings
 }: {
   user: User | null;
   busy: boolean;
@@ -597,6 +633,7 @@ const ProfileMenu = ({
   onGoogleCredential: (credential: string) => Promise<void>;
   onLogout: () => void;
   onOpenDashboard: () => void;
+  onOpenSettings: () => void;
 }) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -677,33 +714,44 @@ const ProfileMenu = ({
           ) : (
             <>
               <p className="profile-title">{user.name}</p>
-              <p className="muted">
-                {user.email} | {user.role}
-              </p>
-              <p className="muted">{`Level ${userLevel?.levelNumber ?? 1} - ${userLevel?.levelName ?? "Noob"} | ${user.readingPoints} XP`}</p>
-              <p className="profile-section-title">Borrowed books: {borrowedCount}</p>
-              {user.role === "ADMIN" && <p className="profile-section-title">Pending requests: {adminPendingCount}</p>}
-              {user.role === "MEMBER" && <p className="profile-section-title">Request updates: {memberUnreadRequestCount}</p>}
+              <p className="muted">{user.role}</p>
+              <p className="muted">{`Level ${userLevel?.levelNumber ?? 1}`}</p>
               <div className="profile-actions-row">
                 <button
-                  className="btn btn-outline profile-btn-small"
+                  className="btn btn-outline profile-btn-small profile-icon-btn"
                   type="button"
+                  aria-label="Open dashboard"
+                  title={`Dashboard (${borrowedCount} borrowed)`}
                   onClick={() => {
                     onOpenDashboard();
                     setOpen(false);
                   }}
                 >
-                  Dashboard
+                  📊
                 </button>
                 <button
-                  className="btn btn-outline profile-btn-small"
+                  className="btn btn-outline profile-btn-small profile-icon-btn"
+                  type="button"
+                  aria-label="Open settings"
+                  title="Settings"
+                  onClick={() => {
+                    onOpenSettings();
+                    setOpen(false);
+                  }}
+                >
+                  ⚙
+                </button>
+                <button
+                  className="btn btn-outline profile-btn-small profile-icon-btn"
+                  aria-label={user.role === "ADMIN" ? `Sign out (pending: ${adminPendingCount})` : `Sign out (updates: ${memberUnreadRequestCount})`}
+                  title="Sign out"
                   onClick={() => {
                     onLogout();
                     setOpen(false);
                   }}
                   type="button"
                 >
-                  Sign out
+                  ⎋
                 </button>
               </div>
             </>
@@ -744,6 +792,9 @@ const App = () => {
   const [dueDateDrafts, setDueDateDrafts] = useState<Record<string, string>>({});
   const [dueDateUpdatingId, setDueDateUpdatingId] = useState<string | null>(null);
   const [checkoutPendingIds, setCheckoutPendingIds] = useState<string[]>([]);
+  const [favoritePendingIds, setFavoritePendingIds] = useState<string[]>([]);
+  const [favoriteBooks, setFavoriteBooks] = useState<Book[]>([]);
+  const [favoriteBooksLoading, setFavoriteBooksLoading] = useState(false);
   const [recommendations, setRecommendations] = useState<Book[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
@@ -861,11 +912,16 @@ const App = () => {
           params.set("cursor", cursor);
         }
 
-        const result = await requestJson<BooksResponse>(`/books?${params.toString()}`);
+        const result = await requestJson<BooksResponse>(`/books?${params.toString()}`, {
+          accessToken: tokenRef.current
+        });
         const isInitialSearch = !cursor;
         if (isInitialSearch && query.trim() && result.data.length === 0 && user) {
           const fallback = await requestJson<SearchFallbackResponse>(
-            `/search/books?q=${encodeURIComponent(query.trim())}&limit=12&withFallback=true`
+            `/search/books?q=${encodeURIComponent(query.trim())}&limit=12&withFallback=true`,
+            {
+              accessToken: tokenRef.current
+            }
           );
           setBooks(fallback.data);
           setHasNextPage(false);
@@ -948,6 +1004,22 @@ const App = () => {
       setRecommendationsLoading(false);
     }
   }, []);
+
+  const loadFavoriteBooks = useCallback(async () => {
+    if (!user) {
+      setFavoriteBooks([]);
+      return;
+    }
+    setFavoriteBooksLoading(true);
+    try {
+      const result = await authRequest<{ data: Book[] }>("/books/favorites?limit=12");
+      setFavoriteBooks(result.data);
+    } catch (error) {
+      setMessage(parseApiError(error));
+    } finally {
+      setFavoriteBooksLoading(false);
+    }
+  }, [authRequest, user]);
 
   const loadUsers = useCallback(async () => {
     if (user?.role !== "ADMIN") {
@@ -1055,6 +1127,7 @@ const App = () => {
     if (!user) {
       setLoans([]);
       setBorrowRequests([]);
+      setFavoriteBooks([]);
       setMemberUnreadRequestCount(0);
       setAdminPendingRequestCount(0);
       setUsers([]);
@@ -1065,8 +1138,8 @@ const App = () => {
       setShowDueSoonDetails(false);
       return;
     }
-    void Promise.all([loadLoans(), loadBorrowRequests(), loadUsers(), loadAdminOverview()]);
-  }, [loadAdminOverview, loadBorrowRequests, loadLoans, loadUsers, user]);
+    void Promise.all([loadLoans(), loadBorrowRequests(), loadUsers(), loadAdminOverview(), loadFavoriteBooks()]);
+  }, [loadAdminOverview, loadBorrowRequests, loadFavoriteBooks, loadLoans, loadUsers, user]);
 
   useEffect(() => {
     if (!user) {
@@ -1084,6 +1157,13 @@ const App = () => {
     }
     void loadRecommendations();
   }, [booting, loadRecommendations, shouldLoadRecommendations, user?.id]);
+
+  useEffect(() => {
+    if (booting || !user || viewMode !== "dashboard") {
+      return;
+    }
+    void Promise.all([loadRecommendations(), loadFavoriteBooks()]);
+  }, [booting, loadFavoriteBooks, loadRecommendations, user, viewMode]);
 
   useEffect(() => {
     if (booting || shouldLoadRecommendations || viewMode !== "catalog") {
@@ -1383,6 +1463,15 @@ const App = () => {
     }
   }, [authRequest, closeBookDetails, loadBorrowRequests, user]);
 
+  const openUserSettings = useCallback(() => {
+    if (!user) {
+      return;
+    }
+    closeBookDetails();
+    setViewMode("settings");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [closeBookDetails, user]);
+
   const scrollToRecommendations = useCallback(() => {
     setShouldLoadRecommendations(true);
     const target = document.getElementById("recommendations-section");
@@ -1401,6 +1490,68 @@ const App = () => {
       return false;
     },
     [user]
+  );
+
+  const toggleFavoriteBook = useCallback(
+    async (bookId: string) => {
+      if (!ensureSignedIn("manage favorites")) {
+        return;
+      }
+      if (favoritePendingIds.includes(bookId)) {
+        return;
+      }
+
+      try {
+        setFavoritePendingIds((current) => [...current, bookId]);
+        const result = await authRequest<FavoriteToggleResponse>(`/books/${bookId}/favorite/toggle`, {
+          method: "POST"
+        });
+        const nextFavorite = result.data.isFavorite;
+
+        const applyFavoriteState = (book: Book): Book =>
+          book.id === bookId
+            ? {
+                ...book,
+                isFavorite: nextFavorite
+              }
+            : book;
+
+        setBooks((current) => current.map(applyFavoriteState));
+        setRecommendations((current) => current.map(applyFavoriteState));
+        setFavoriteBooks((current) => {
+          if (nextFavorite) {
+            const sourceBook =
+              books.find((book) => book.id === bookId) ??
+              recommendations.find((book) => book.id === bookId) ??
+              bookDetails?.book;
+            if (!sourceBook || current.some((book) => book.id === bookId)) {
+              return current;
+            }
+            return [applyFavoriteState(sourceBook), ...current].slice(0, 12);
+          }
+          return current.filter((book) => book.id !== bookId);
+        });
+        setBookDetails((current) =>
+          current
+            ? {
+                ...current,
+                book: applyFavoriteState(current.book),
+                relatedBooks: current.relatedBooks.map(applyFavoriteState)
+              }
+            : current
+        );
+
+        setMessage(nextFavorite ? "Added to favorites." : "Removed from favorites.");
+        if (user) {
+          void Promise.all([loadRecommendations(), loadFavoriteBooks()]);
+        }
+      } catch (error) {
+        setMessage(parseApiError(error));
+      } finally {
+        setFavoritePendingIds((current) => current.filter((id) => id !== bookId));
+      }
+    },
+    [authRequest, bookDetails?.book, books, ensureSignedIn, favoritePendingIds, loadFavoriteBooks, loadRecommendations, recommendations, user]
   );
 
   useEffect(() => {
@@ -1769,7 +1920,7 @@ const App = () => {
         Skip to main content
       </a>
       <header className="topbar">
-        <div>
+        <div className="topbar-title">
           <h1>{user ? `Hi, ${user.name}` : "Browse the public catalog"}</h1>
         </div>
         <ProfileMenu
@@ -1781,6 +1932,7 @@ const App = () => {
           onGoogleCredential={loginWithGoogleCredential}
           onLogout={logout}
           onOpenDashboard={openUserDashboard}
+          onOpenSettings={openUserSettings}
         />
       </header>
 
@@ -1848,6 +2000,12 @@ const App = () => {
                       </p>
                     </div>
                     <div className="row-actions">
+                      <FavoriteStarButton
+                        bookId={bookDetails.book.id}
+                        isFavorite={bookDetails.book.isFavorite}
+                        isPending={favoritePendingIds.includes(bookDetails.book.id)}
+                        onToggle={toggleFavoriteBook}
+                      />
                       <button className="btn btn-outline" type="button" onClick={() => void shareCurrentBook()}>
                         Share link
                       </button>
@@ -2004,7 +2162,18 @@ const App = () => {
                             <h3 className="book-title" title={relatedBook.title}>
                               {truncateText(relatedBook.title, 90)}
                             </h3>
-                            <p className="muted">{relatedBook.author}</p>
+                            <div className="book-card-subhead">
+                              <p className="muted">{relatedBook.author}</p>
+                              <div className="title-row-icons">
+                                <AiMetadataBadge book={relatedBook} />
+                                <FavoriteStarButton
+                                  bookId={relatedBook.id}
+                                  isFavorite={relatedBook.isFavorite}
+                                  isPending={favoritePendingIds.includes(relatedBook.id)}
+                                  onToggle={toggleFavoriteBook}
+                                />
+                              </div>
+                            </div>
                             <BookRating book={relatedBook} />
                           </header>
                         </div>
@@ -2029,9 +2198,13 @@ const App = () => {
           </section>
         ) : (
           <>
-        {viewMode === "dashboard" && user && (
+        {(viewMode === "dashboard" || viewMode === "settings") && user && (
           <section className="panel dashboard-nav" aria-label="Dashboard navigation">
-            <p className="muted">Dashboard view includes your loans and management tools.</p>
+            <p className="muted">
+              {viewMode === "dashboard"
+                ? "Dashboard view includes your loans and management tools."
+                : "Settings view includes your profile and appearance preferences."}
+            </p>
             <button className="btn btn-outline dashboard-back-btn" type="button" onClick={() => setViewMode("catalog")}>
               Back to Home
             </button>
@@ -2053,21 +2226,16 @@ const App = () => {
                   >
                     <span className="catalog-head-value">{`${dueSoonCount} book${dueSoonCount === 1 ? "" : "s"}`}</span>
                   </button>
-                  <p className="muted">
-                    {user.role === "ADMIN" ? "All member loans due in the next 3 days" : "Your books due in the next 3 days"}
-                  </p>
                 </article>
                 <article className="panel catalog-head-card">
                   <h3>My loans</h3>
                   <p className="catalog-head-value">{`${myActiveLoans.length} active`}</p>
-                  <p className="muted">Borrowed books in your account</p>
                 </article>
                 <article className="panel catalog-head-card">
                   <h3>Recommendations</h3>
                   <button className="catalog-head-value-btn" type="button" onClick={scrollToRecommendations}>
                     <span className="catalog-head-value">{recommendations.length} picks</span>
                   </button>
-                  <p className="muted">Based on your recent activity</p>
                 </article>
               </section>
             )}
@@ -2261,13 +2429,21 @@ const App = () => {
                         <div className="book-card-head storefront-book-head">
                           <BookCover book={book} className="book-cover-thumb" />
                           <header>
-                            <div className="title-row">
-                              <h3 className="book-title" title={book.title}>
-                                {truncateText(book.title, 120)}
-                              </h3>
-                              <AiMetadataBadge book={book} />
+                            <h3 className="book-title" title={book.title}>
+                              {truncateText(book.title, 120)}
+                            </h3>
+                            <div className="book-card-subhead">
+                              <p className="muted">{book.author}</p>
+                              <div className="title-row-icons">
+                                <AiMetadataBadge book={book} />
+                                <FavoriteStarButton
+                                  bookId={book.id}
+                                  isFavorite={book.isFavorite}
+                                  isPending={favoritePendingIds.includes(book.id)}
+                                  onToggle={toggleFavoriteBook}
+                                />
+                              </div>
                             </div>
-                            <p className="muted">{book.author}</p>
                             <BookRating book={book} />
                           </header>
                         </div>
@@ -2381,15 +2557,23 @@ const App = () => {
                         }}
                       >
                         <BookCover book={book} className="book-cover-thumb shelf-cover" />
-                        <div className="title-row">
-                          <h3 className="shelf-title" title={book.title}>
-                            {truncateText(book.title, 100)}
-                          </h3>
-                          <AiMetadataBadge book={book} />
+                        <h3 className="shelf-title" title={book.title}>
+                          {truncateText(book.title, 100)}
+                        </h3>
+                        <div className="book-card-subhead">
+                          <p className="muted shelf-author" title={book.author}>
+                            {truncateText(book.author, 70)}
+                          </p>
+                          <div className="title-row-icons">
+                            <AiMetadataBadge book={book} />
+                            <FavoriteStarButton
+                              bookId={book.id}
+                              isFavorite={book.isFavorite}
+                              isPending={favoritePendingIds.includes(book.id)}
+                              onToggle={toggleFavoriteBook}
+                            />
+                          </div>
                         </div>
-                        <p className="muted shelf-author" title={book.author}>
-                          {truncateText(book.author, 70)}
-                        </p>
                         <BookRating book={book} />
                         <p className="muted clamp-2 shelf-genre" title={book.genre ?? "General"}>
                           {truncateText(book.genre ?? "General", 100)}
@@ -2434,107 +2618,6 @@ const App = () => {
 
         {viewMode === "dashboard" && user && (
           <>
-            <section className="panel" aria-labelledby="contact-profile-title">
-              <div className="panel-head">
-                <h2 id="contact-profile-title">My contact profile</h2>
-              </div>
-              <p className="muted">Phone and contact email are used by admins for return reminders.</p>
-              <div className="editor-grid contact-grid">
-                <label>
-                  Contact email
-                  <input
-                    type="email"
-                    value={contactDraft.contactEmail}
-                    onChange={(event) =>
-                      setContactDraft((current) => ({ ...current, contactEmail: event.target.value }))
-                    }
-                    required
-                  />
-                </label>
-                <label>
-                  Phone number
-                  <input
-                    value={contactDraft.phoneNumber}
-                    onChange={(event) =>
-                      setContactDraft((current) => ({ ...current, phoneNumber: event.target.value }))
-                    }
-                    required
-                  />
-                </label>
-                <label>
-                  Personal ID (optional)
-                  <input
-                    value={contactDraft.personalId}
-                    onChange={(event) =>
-                      setContactDraft((current) => ({ ...current, personalId: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Account email (Google SSO)
-                  <input value={user.email} readOnly />
-                </label>
-              </div>
-              <div className="row-actions">
-                <button className="btn" type="button" onClick={() => void saveMyContactProfile()} disabled={savingContact}>
-                  {savingContact ? "Saving..." : "Save contact profile"}
-                </button>
-              </div>
-            </section>
-
-            <section className="panel" aria-labelledby="appearance-title">
-              <div className="panel-head">
-                <h2 id="appearance-title">Appearance</h2>
-              </div>
-              <p className="muted">Choose your avatar and app background theme.</p>
-              <div className="appearance-grid">
-                <div>
-                  <p className="profile-section-title">Avatar presets</p>
-                  <div className="avatar-preset-grid">
-                    {avatarPresets.map((preset) => (
-                      <button
-                        key={preset.id}
-                        className={`avatar-preset-btn ${appearanceDraft.avatarPreset === preset.id ? "active" : ""}`}
-                        type="button"
-                        onClick={() => setAppearanceDraft((current) => ({ ...current, avatarPreset: preset.id }))}
-                        aria-label={`Use ${preset.label} avatar`}
-                      >
-                        <span className="avatar-preset-circle" style={{ background: preset.innerBackground }}>
-                          {preset.emoji}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="profile-section-title">Background presets</p>
-                  <div className="bg-preset-grid">
-                    {backgroundPresets.map((preset) => (
-                      <button
-                        key={preset.id}
-                        className={`bg-preset-btn ${appearanceDraft.backgroundPreset === preset.id ? "active" : ""}`}
-                        type="button"
-                        onClick={() => {
-                          setAppearanceDraft((current) => ({ ...current, backgroundPreset: preset.id }));
-                          document.body.style.background = preset.background;
-                          document.body.style.color = preset.id === "bg-9" ? "#f1f5f9" : "";
-                        }}
-                        aria-label={`Use ${preset.label} background`}
-                        title={preset.label}
-                      >
-                        <span className="bg-preset-preview" style={{ background: preset.background }} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="row-actions">
-                <button className="btn" type="button" onClick={() => void saveAppearancePreferences()} disabled={savingAppearance}>
-                  {savingAppearance ? "Saving..." : "Save appearance"}
-                </button>
-              </div>
-            </section>
-
             <section className="panel two-col">
               <section id="loans-section" aria-labelledby="loans-title">
                 <div className="panel-head">
@@ -2657,6 +2740,259 @@ const App = () => {
                   </ul>
                 )}
               </section>
+            </section>
+
+            <section className="panel two-col" aria-label="Personalized discovery">
+              <section aria-labelledby="dashboard-recommended-title">
+                <div className="panel-head">
+                  <h2 id="dashboard-recommended-title">Recommended for you</h2>
+                </div>
+                {recommendationsLoading && <p className="muted">Updating recommendations...</p>}
+                {!recommendationsLoading && recommendations.length === 0 && (
+                  <p className="muted">No recommendations yet.</p>
+                )}
+                <div className="recommendation-shelf" role="list">
+                  {recommendations.slice(0, 8).map((book) => (
+                    <article
+                      key={`dashboard-reco-${book.id}`}
+                      className="shelf-card clickable-card"
+                      role="listitem"
+                      tabIndex={0}
+                      aria-label={`Open details for ${book.title}`}
+                      onClick={(event) => {
+                        if (isInteractiveTarget(event.target)) {
+                          return;
+                        }
+                        openBookDetails(book.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (isInteractiveTarget(event.target)) {
+                          return;
+                        }
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openBookDetails(book.id);
+                        }
+                      }}
+                    >
+                      <BookCover book={book} className="book-cover-thumb shelf-cover" />
+                      <h3 className="shelf-title" title={book.title}>
+                        {truncateText(book.title, 100)}
+                      </h3>
+                      <div className="book-card-subhead">
+                        <p className="muted shelf-author" title={book.author}>
+                          {truncateText(book.author, 70)}
+                        </p>
+                        <div className="title-row-icons">
+                          <AiMetadataBadge book={book} />
+                          <FavoriteStarButton
+                            bookId={book.id}
+                            isFavorite={book.isFavorite}
+                            isPending={favoritePendingIds.includes(book.id)}
+                            onToggle={toggleFavoriteBook}
+                          />
+                        </div>
+                      </div>
+                      <BookRating book={book} />
+                      <p className="muted clamp-2 shelf-genre" title={book.genre ?? "General"}>
+                        {truncateText(book.genre ?? "General", 90)}
+                      </p>
+                      <p className="muted clamp-2 shelf-description" title={book.description ?? "No description yet."}>
+                        {truncateText(book.description ?? "No description yet.", 100)}
+                      </p>
+                      <p
+                        className={`status-pill ${
+                          book.requestPending ? "pending" : book.available ? "available" : "unavailable"
+                        }`}
+                      >
+                        {book.requestPending
+                          ? "Pending approval"
+                          : book.available
+                            ? "Checked in (returned)"
+                            : "Checked out (borrowed)"}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section aria-labelledby="dashboard-favorites-title">
+                <div className="panel-head">
+                  <h2 id="dashboard-favorites-title">My favorites</h2>
+                </div>
+                {favoriteBooksLoading && <p className="muted">Loading favorites...</p>}
+                {!favoriteBooksLoading && favoriteBooks.length === 0 && (
+                  <p className="muted">No favorite books yet. Tap the star on any book card.</p>
+                )}
+                <div className="recommendation-shelf" role="list">
+                  {favoriteBooks.map((book) => (
+                    <article
+                      key={`dashboard-fav-${book.id}`}
+                      className="shelf-card clickable-card"
+                      role="listitem"
+                      tabIndex={0}
+                      aria-label={`Open details for ${book.title}`}
+                      onClick={(event) => {
+                        if (isInteractiveTarget(event.target)) {
+                          return;
+                        }
+                        openBookDetails(book.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (isInteractiveTarget(event.target)) {
+                          return;
+                        }
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openBookDetails(book.id);
+                        }
+                      }}
+                    >
+                      <BookCover book={book} className="book-cover-thumb shelf-cover" />
+                      <h3 className="shelf-title" title={book.title}>
+                        {truncateText(book.title, 100)}
+                      </h3>
+                      <div className="book-card-subhead">
+                        <p className="muted shelf-author" title={book.author}>
+                          {truncateText(book.author, 70)}
+                        </p>
+                        <div className="title-row-icons">
+                          <AiMetadataBadge book={book} />
+                          <FavoriteStarButton
+                            bookId={book.id}
+                            isFavorite={book.isFavorite}
+                            isPending={favoritePendingIds.includes(book.id)}
+                            onToggle={toggleFavoriteBook}
+                          />
+                        </div>
+                      </div>
+                      <BookRating book={book} />
+                      <p className="muted clamp-2 shelf-genre" title={book.genre ?? "General"}>
+                        {truncateText(book.genre ?? "General", 90)}
+                      </p>
+                      <p className="muted clamp-2 shelf-description" title={book.description ?? "No description yet."}>
+                        {truncateText(book.description ?? "No description yet.", 100)}
+                      </p>
+                      <p
+                        className={`status-pill ${
+                          book.requestPending ? "pending" : book.available ? "available" : "unavailable"
+                        }`}
+                      >
+                        {book.requestPending
+                          ? "Pending approval"
+                          : book.available
+                            ? "Checked in (returned)"
+                            : "Checked out (borrowed)"}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </section>
+          </>
+        )}
+
+        {viewMode === "settings" && user && (
+          <>
+            <section className="panel" aria-labelledby="contact-profile-title">
+              <div className="panel-head">
+                <h2 id="contact-profile-title">My contact profile</h2>
+              </div>
+              <p className="muted">Phone and contact email are used by admins for return reminders.</p>
+              <div className="editor-grid contact-grid">
+                <label>
+                  Contact email
+                  <input
+                    type="email"
+                    value={contactDraft.contactEmail}
+                    onChange={(event) =>
+                      setContactDraft((current) => ({ ...current, contactEmail: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Phone number
+                  <input
+                    value={contactDraft.phoneNumber}
+                    onChange={(event) =>
+                      setContactDraft((current) => ({ ...current, phoneNumber: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Personal ID (optional)
+                  <input
+                    value={contactDraft.personalId}
+                    onChange={(event) =>
+                      setContactDraft((current) => ({ ...current, personalId: event.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Account email (Google SSO)
+                  <input value={user.email} readOnly />
+                </label>
+              </div>
+              <div className="row-actions">
+                <button className="btn" type="button" onClick={() => void saveMyContactProfile()} disabled={savingContact}>
+                  {savingContact ? "Saving..." : "Save contact profile"}
+                </button>
+              </div>
+            </section>
+
+            <section className="panel" aria-labelledby="appearance-title">
+              <div className="panel-head">
+                <h2 id="appearance-title">Appearance</h2>
+              </div>
+              <p className="muted">Choose your avatar and app background theme.</p>
+              <div className="appearance-grid">
+                <div>
+                  <p className="profile-section-title">Avatar presets</p>
+                  <div className="avatar-preset-grid">
+                    {avatarPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        className={`avatar-preset-btn ${appearanceDraft.avatarPreset === preset.id ? "active" : ""}`}
+                        type="button"
+                        onClick={() => setAppearanceDraft((current) => ({ ...current, avatarPreset: preset.id }))}
+                        aria-label={`Use ${preset.label} avatar`}
+                      >
+                        <span className="avatar-preset-circle" style={{ background: preset.innerBackground }}>
+                          {preset.emoji}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="profile-section-title">Background presets</p>
+                  <div className="bg-preset-grid">
+                    {backgroundPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        className={`bg-preset-btn ${appearanceDraft.backgroundPreset === preset.id ? "active" : ""}`}
+                        type="button"
+                        onClick={() => {
+                          setAppearanceDraft((current) => ({ ...current, backgroundPreset: preset.id }));
+                          document.body.style.background = preset.background;
+                          document.body.style.color = preset.id === "bg-9" ? "#f1f5f9" : "";
+                        }}
+                        aria-label={`Use ${preset.label} background`}
+                        title={preset.label}
+                      >
+                        <span className="bg-preset-preview" style={{ background: preset.background }} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="row-actions">
+                <button className="btn" type="button" onClick={() => void saveAppearancePreferences()} disabled={savingAppearance}>
+                  {savingAppearance ? "Saving..." : "Save appearance"}
+                </button>
+              </div>
             </section>
           </>
         )}

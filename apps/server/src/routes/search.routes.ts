@@ -7,6 +7,48 @@ import { FALLBACK_BOOKS } from "../lib/fallback-books";
 import { optionalAuth } from "../middleware/auth";
 
 const router = Router();
+
+const applyFavoriteFlagsForViewer = async <
+  TBook extends {
+    id: string;
+  }
+>(
+  books: TBook[],
+  viewerId?: string
+): Promise<Array<TBook & { isFavorite: boolean }>> => {
+  if (!viewerId || books.length === 0) {
+    return books.map((book) => ({ ...book, isFavorite: false }));
+  }
+
+  let favorites: Array<{ bookId: string }> = [];
+  try {
+    favorites = await prisma.bookFavorite.findMany({
+      where: {
+        userId: viewerId,
+        bookId: { in: books.map((book) => book.id) }
+      },
+      select: {
+        bookId: true
+      }
+    });
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2021"
+    ) {
+      return books.map((book) => ({ ...book, isFavorite: false }));
+    }
+    throw error;
+  }
+  const favoriteIds = new Set(favorites.map((favorite) => favorite.bookId));
+  return books.map((book) => ({
+    ...book,
+    isFavorite: favoriteIds.has(book.id)
+  }));
+};
+
 const isMissingColumnError = (error: unknown): boolean => {
   return (
     typeof error === "object" &&
@@ -51,8 +93,10 @@ router.get(
       coverUrl: string | null;
       averageRating: number | null;
       ratingsCount: number | null;
+      aiMetadata?: boolean;
       available: boolean;
       requestPending: boolean;
+      isFavorite?: boolean;
       createdAt: Date;
       updatedAt: Date;
     }>;
@@ -88,9 +132,13 @@ router.get(
         ...book,
         averageRating: null,
         ratingsCount: null,
+        aiMetadata: false,
+        isFavorite: false,
         requestPending: false
       }));
     }
+
+    books = await applyFavoriteFlagsForViewer(books, req.user?.id);
 
     if (books.length > 0 || !query.withFallback) {
       res.status(200).json({
@@ -112,7 +160,9 @@ router.get(
           (book.genre ?? "").toLowerCase().includes(q) ||
           (book.isbn ?? "").toLowerCase().includes(q)
         );
-      }).slice(0, query.limit);
+      })
+        .slice(0, query.limit)
+        .map((book) => ({ ...book, isFavorite: false }));
       if (fallback.length > 0) {
         res.status(200).json({
           data: fallback,
@@ -149,8 +199,9 @@ router.get(
     }
 
     const persisted = await persistExternalBooks(externalResult.books);
+    const data = await applyFavoriteFlagsForViewer(persisted.books, req.user?.id);
     res.status(200).json({
-      data: persisted.books,
+      data,
       meta: {
         source: externalResult.sourceUsed,
         fallbackUsed: externalResult.fallbackUsed,
