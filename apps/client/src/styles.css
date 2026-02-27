@@ -471,7 +471,7 @@ label {
 
 .book-card:hover,
 .book-card:focus-within {
-  transform: scale(1.1);
+  transform: scale(1.03);
   box-shadow: 0 16px 36px rgba(20, 30, 45, 0.2);
   z-index: 2;
 }
@@ -692,7 +692,7 @@ label {
 
 .shelf-card:hover,
 .shelf-card:focus-within {
-  transform: scale(1.1);
+  transform: scale(1.03);
   box-shadow: 0 16px 36px rgba(20, 30, 45, 0.2);
   z-index: 2;
 }
